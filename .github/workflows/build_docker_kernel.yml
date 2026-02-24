@@ -15,14 +15,16 @@ jobs:
           kernel-branch: lineage-23.0
           config: vendor/kebab_defconfig
           arch: arm64
+          
           android-version: 12
           aosp-gcc: true
           
           aosp-clang: false
           
-          other-clang-url: https://github.com/ZyCromerZ/Clang/releases/download/14.0.6-20220905-full/Clang-14.0.6-20220905-full.tar.gz
+          other-clang-url: https://gitlab.com/ElectroPerf/atom-clang/-/archive/main/atom-clang-main.tar.gz
           
           lxc: true
           lxc-patch: true
+          
           anykernel3: true
-          extra-make-args: '["LLVM=1", "LLVM_IAS=1"]'
+          extra-make-args: '["LLVM=1", "LLVM_IAS=1", "NM=llvm-nm", "OBJCOPY=llvm-objcopy", "OBJDUMP=llvm-objdump", "STRIP=llvm-strip"]'
