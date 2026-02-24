@@ -15,7 +15,7 @@ jobs:
           kernel-branch: lineage-23.0
           config: vendor/kebab_defconfig
           arch: arm64
-          android-version: 14
+          android-version: 12
           aosp-gcc: true
           aosp-clang: true
           aosp-clang-version: r487747c
