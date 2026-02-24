@@ -16,6 +16,7 @@ jobs:
           config: vendor/kebab_defconfig
           arch: arm64
           android-version: 14
+          aosp-gcc: true
           aosp-clang: true
           aosp-clang-version: r522815
           lxc: true
