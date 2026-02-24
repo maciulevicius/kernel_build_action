@@ -12,21 +12,19 @@ jobs:
         uses: dabao1955/kernel_build_action@main
         with:
           kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
-          kernel-branch: lineage-23.0
+          kernel-branch: lineage-23 
           
-          kernel-dir: .
-          
-          config: vendor/kebab_defconfig
+          config: kebab_defconfig
           arch: arm64
+          vendor: true 
 
           android-version: 12
           aosp-gcc: true
-          aosp-clang: false
-          other-clang-url: https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz
-
+          aosp-clang: true
+          aosp-clang-version: r522815 
+          
           lxc: true
           lxc-patch: true
           
           anykernel3: true
-
-          extra-make-args: '["LLVM=1", "LLVM_IAS=1", "NM=llvm-nm", "OBJCOPY=llvm-objcopy", "OBJDUMP=llvm-objdump", "STRIP=llvm-strip"]'
+          extra-make-args: '["LLVM=1", "LLVM_IAS=1"]'
