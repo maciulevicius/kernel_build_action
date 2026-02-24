@@ -1,0 +1,24 @@
+name: Build OnePlus 8T Docker Kernel
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    name: Build Kernel
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build
+        uses: dabao1955/kernel_build_action@main
+        with:
+          kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
+          kernel-branch: lineage-23.0
+          config: vendor/kebab_defconfig
+          arch: arm64
+          android-version: 14
+          aosp-clang: true
+          aosp-clang-version: r522815
+          lxc: true
+          lxc-patch: true
+          anykernel3: true
+          extra-make-args: '["LLVM=1", "LLVM_IAS=1"]'
