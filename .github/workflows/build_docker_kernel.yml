@@ -28,15 +28,4 @@ jobs:
           lxc-patch: false
 
           anykernel3: true
-          extra-make-args: >
-            [
-              "LLVM=1",
-              "LLVM_IAS=1",
-              "NM=llvm-nm",
-              "OBJCOPY=llvm-objcopy",
-              "OBJDUMP=llvm-objdump",
-              "STRIP=llvm-strip",
-              "LD=ld.lld",
-              "AR=llvm-ar",
-              "KCFLAGS=-Wno-error=conflicting-types -Wno-error=int-conversion"
-            ]
+          extra-make-args: '["LLVM=1", "NM=llvm-nm", "OBJCOPY=llvm-objcopy", "OBJDUMP=llvm-objdump", "STRIP=llvm-strip", "LD=ld.lld", "AR=llvm-ar", "KCFLAGS=-w", "CONFIG_WERROR=n"]'
