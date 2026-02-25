@@ -8,6 +8,9 @@ jobs:
     name: Build Kernel
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Build
         uses: dabao1955/kernel_build_action@main
         with:
@@ -17,7 +20,7 @@ jobs:
           config: vendor/kona-perf_defconfig
           arch: arm64
           vendor: false
-          kernel-dir: .          
+          kernel-dir: .
 
           android-version: 12
           aosp-gcc: true
@@ -28,4 +31,4 @@ jobs:
           lxc-patch: false
 
           anykernel3: true
-          extra-make-args: '["LLVM=1", "LLVM_IAS=0", "KCFLAGS=-w", "WERROR=0"]'
+          extra-make-args: '["KCFLAGS=-w", "WERROR=0", "LLVM_IAS=0"]'
