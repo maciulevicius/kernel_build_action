@@ -21,8 +21,8 @@ jobs:
 
           android-version: 12
           aosp-gcc: true
-          aosp-clang: false
-          other-clang-url: https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz
+          aosp-clang: true
+          aosp-clang-version: r487747c
 
           lxc: true
           lxc-patch: false
