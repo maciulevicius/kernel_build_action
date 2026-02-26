@@ -15,21 +15,25 @@ jobs:
           kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
           kernel-branch: lineage-21
           
-          # 2. KONFIGŪRACIJA
+          # 2. KONFIGŪRACIJA (Garantuotas kelias iki kona-perf_defconfig)
           config: vendor/kona-perf_defconfig
           arch: arm64
           vendor: false
           kernel-dir: .
 
-          # 3. ĮRANKIAI (Leidžiame skriptui viską parinkti automatiškai)
-          android-version: 13
+          # 3. ĮRANKIAI (Apeiname 400 klaidą)
+          android-version: 12
           aosp-gcc: true
-          aosp-clang: true
-          
-          # 4. DOCKER / LXC PALAIKYMAS (Tai įjungia PID_NS, IPC_NS ir kitus "missing")
+          # Išjungiame probleminį Google Clang
+          aosp-clang: false
+          # Naudojame Proton Clang - jis atsisiunčia be klaidų ir veikia puikiai
+          other-clang-url: https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz
+
+          # 4. DOCKER / LXC PALAIKYMAS (Tai sutvarkys tuos "missing" PID_NS ir kt.)
           lxc: true
           lxc-patch: false
           
-          # 5. PAKAVIMAS (Jokių rankinių LLVM=1 nustatymų!)
+          # 5. PAKAVIMAS IR KLIPAI
           anykernel3: true
+          # Naudojame tik minimalius nustatymus, kad Makefile nesipyktų
           extra-make-args: '["KCFLAGS=-w", "WERROR=0"]'
