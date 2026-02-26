@@ -13,7 +13,7 @@ jobs:
           kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
           kernel-branch: lineage-23.2
 
-          config: kebab_defconfig
+          config: vendor/kona-perf_defconfig
           arch: arm64
           vendor: false
           kernel-dir: .
