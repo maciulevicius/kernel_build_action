@@ -37,7 +37,7 @@ jobs:
           lxc: true
           lxc-patch: false
           anykernel3: true
-          extra-make-args: [
+          extra-make-args: '[
             "LLVM=1",
             "LLVM_IAS=1",
             "CC=clang",
@@ -51,4 +51,4 @@ jobs:
             "CROSS_COMPILE_ARM32=arm-linux-gnueabi-",
             "KCFLAGS=-w",
             "WERROR=0"
-          ]
+          ]'
