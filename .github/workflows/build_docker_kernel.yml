@@ -1,3 +1,4 @@
+
 name: Build OnePlus 8T Docker Kernel
 
 on:
@@ -10,37 +11,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download ZyC Clang 23
+      - name: Download Clang
         run: |
           mkdir -p $GITHUB_WORKSPACE/clang
           curl -L "https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz" -o clang.tar.gz
           tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
-        
+
       - name: Pull and Patch Kernel Source
         run: |
           git clone --recursive -b lineage-23.2 --depth 1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
-          sed -i 's/CONFIG_QTI_SCHGM_FLASH=y/CONFIG_QTI_SCHGM_FLASH=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
+          # AGRESYVUS FIX: Fiziškai išvalome klaidas metantį failą
+          find kernel -name "schgm-flash.c" -exec sh -c 'echo "/* empty */" > {}' \;
+          # Išjungiame WERROR (warnings = errors)
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
           echo "CONFIG_WERROR=n" >> kernel/arch/arm64/configs/vendor/kona-perf_defconfig
-          
+
       - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
         with:
-          kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
-          kernel-branch: lineage-23.2
+          kernel-dir: kernel
           config: vendor/kona-perf_defconfig
           arch: arm64
           vendor: false
-          kernel-dir: .
-
           aosp-gcc: false
           aosp-clang: false
-
           lxc: true
           lxc-patch: false
           anykernel3: true
-          
-          extra-make-args: '[
+          extra-make-args: [
             "LLVM=1",
             "LLVM_IAS=1",
             "CC=clang",
@@ -54,4 +53,4 @@ jobs:
             "CROSS_COMPILE_ARM32=arm-linux-gnueabi-",
             "KCFLAGS=-w",
             "WERROR=0"
-          ]'
+          ]
