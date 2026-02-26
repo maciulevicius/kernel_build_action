@@ -17,6 +17,12 @@ jobs:
           tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
+      - name: Pull and Patch Kernel Source
+        run: |
+          git clone --recursive -b lineage-23.2 --depth 1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
+          sed -i 's/CONFIG_QTI_SCHGM_FLASH=y/CONFIG_QTI_SCHGM_FLASH=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig || true
+          
       - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
         with:
@@ -34,7 +40,7 @@ jobs:
           lxc-patch: false
           anykernel3: true
 
-          extra-make-args: '[
+         extra-make-args: '[
             "LLVM=1",
             "LLVM_IAS=1",
             "CC=clang",
@@ -48,4 +54,4 @@ jobs:
             "CROSS_COMPILE_ARM32=arm-linux-gnueabi-",
             "KCFLAGS=-w",
             "WERROR=0"
-            ]'
+          ]'
