@@ -88,8 +88,13 @@ jobs:
             KCFLAGS="-w -Wno-error" \
             KCPPFLAGS="-D__ANDROID_COMMON_KERNEL__"
 
-      - name: Upload Kernel Image
+      - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Image-OnePlus8T-Server
-          path: kernel/out/arch/arm64/boot/Image
+          name: OnePlus8T-Docker-Kernel-Full
+          path: |
+            kernel/out/arch/arm64/boot/Image
+            kernel/out/arch/arm64/boot/Image.gz
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/arch/arm64/boot/dtbo.img
+            kernel/out/arch/arm64/boot/dtb.img
