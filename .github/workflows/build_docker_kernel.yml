@@ -7,6 +7,12 @@ jobs:
   build-kernel:
     runs-on: ubuntu-latest
     steps:
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y coccinelle
+      
       - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
         with:
