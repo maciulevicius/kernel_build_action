@@ -26,8 +26,9 @@ jobs:
 
           android-version:
 
-          aosp-gcc: false
-          aosp-clang: false
+          aosp-gcc: true
+          aosp-clang: true
+          aosp-clang-version: r383902
 
           lxc: true
           lxc-patch: false
