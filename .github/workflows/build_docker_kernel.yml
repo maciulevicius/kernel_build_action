@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel
+name: Build OnePlus 8T HA-Docker Kernel
 
 on:
   workflow_dispatch:
@@ -24,22 +24,30 @@ jobs:
         run: |
           git clone --depth 1 -b 14.0 https://github.com/crdroidandroid/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel
+      - name: Patch Kernel (Stubs & Config)
         run: |
           cd kernel
 
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
+          #include <linux/types.h>
+          #include <linux/export.h>
+          #include <linux/kernel.h>
 
           bool is_flash_active(void) { return false; }
           EXPORT_SYMBOL(is_flash_active);
-          int schgm_flash_torch_priority(int dummy) { return 0; }
+
+          int schgm_flash_torch_priority(int level) { return 0; }
           EXPORT_SYMBOL(schgm_flash_torch_priority);
-          int schgm_flash_init(void *dummy) { return 0; }
+
+          int schgm_flash_init(void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_init);
+
           bool schgm_flash_get_vreg_ok(void) { return true; }
           EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
+
           int schgm_flash_ilim2_irq_handler(int irq, void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
+
           int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
@@ -50,18 +58,24 @@ jobs:
           {
             echo "CONFIG_WERROR=n"
             echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
+            # Docker reikalavimai
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
+            echo "CONFIG_BLK_DEV_THROTTLING=y"
+            # USB Serial Zigbee (Visi galimi draiveriai)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
+            # USB Storage ir kiti HA reikalai
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_USB_UAS=y"
+            echo "CONFIG_EXFAT_FS=y"
+            echo "CONFIG_NTFS_FS=y"
             echo "CONFIG_OPLUS_CHG=y"
           } >> $DEFCONFIG
 
@@ -70,7 +84,9 @@ jobs:
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          
+
+          make O=out ARCH=arm64 olddefconfig
+
           make -j2 O=out ARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -78,13 +94,13 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             KCFLAGS="-w -Wno-error" \
+            KCPPFLAGS="-D__ANDROID_COMMON_KERNEL__" \
             Image.gz dtbs
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Server-Kernel
-          # Paimame branduolį ir visus DTB/DTBO failus (jie bus dts aplanke)
+          name: OnePlus8T-Server-Kernel-Final
           path: |
             kernel/out/arch/arm64/boot/Image.gz
             kernel/out/arch/arm64/boot/dts/vendor/oplus/*.dtb
