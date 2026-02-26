@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Docker Kernel
+name: Build OnePlus 8T Server Kernel
 
 on:
   workflow_dispatch:
@@ -15,25 +15,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl
 
-      - name: Download ZyC Clang 18
+      - name: Download Proton Clang (Safe Method)
         run: |
-          mkdir -p $GITHUB_WORKSPACE/clang
-          curl -L "https://github.com/ZyCromerZ/Clang/releases/download/18.1.8-release/Clang-18.1.8.tar.gz" -o clang.tar.gz
-          tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
+          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Kernel
+      - name: Clone Kernel Source
         run: |
-          git clone --recursive -b lineage-23.2 --depth 1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
+          git clone --depth=1 -b 14.0 https://github.com/crdroidandroid/android_kernel_oneplus_sm8250 kernel
       
-      - name: Patch Kernel for HA Server (Docker + USB + FastCharge)
+      - name: Patch Kernel for HA Server
         run: |
           cd kernel
-          # 1. Sutvarkome lūžtantį flash vairuotoją
           echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
           
-          # 2. IŠTAISOME visas Linker klaidas (Undefined symbols)
-          cat <<EOF > drivers/soc/qcom/oplus_server_stubs.c
+          # 2. IŠTAISOME visas Linker klaidas (get_project, oplus_vooc ir t.t.)
+          # Sukuriame oplus_identity.c, kad branduolys sėkmingai susijungtų
+          cat <<EOF > drivers/soc/qcom/oplus_identity.c
           #include <linux/export.h>
           #include <linux/types.h>
 
@@ -69,59 +67,35 @@ jobs:
           EXPORT_SYMBOL(oplus_vooc_get_fastchg_ing);
           EOF
 
-          echo "obj-y += oplus_server_stubs.o" >> drivers/soc/qcom/Makefile
+          echo "obj-y += oplus_identity.o" >> drivers/soc/qcom/Makefile
           
-          # 3. Konfigūruojame defconfig Zigbee ir Diskams
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' arch/arm64/configs/vendor/kona-perf_defconfig
+          make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          {
-            echo "CONFIG_WERROR=n"
-            echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
-            # Docker bazė
-            echo "CONFIG_OVERLAY_FS=y"
-            echo "CONFIG_CGROUP_BPF=y"
-            # USB Serial (Zigbee lazdelėms: CP210x, FTDI, CH341)
-            echo "CONFIG_USB_SERIAL=y"
-            echo "CONFIG_USB_SERIAL_CONSOLE=y"
-            echo "CONFIG_USB_SERIAL_GENERIC=y"
-            echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
-            echo "CONFIG_USB_SERIAL_CH341=y"
-            echo "CONFIG_USB_SERIAL_OPTION=y"
-            # USB Storage (Diskams)
-            echo "CONFIG_USB_STORAGE=y"
-            echo "CONFIG_USB_UAS=y"
-            echo "CONFIG_EXFAT_FS=y"
-            echo "CONFIG_NTFS_FS=y"
-            # Fast Charge palaikymas
-            echo "CONFIG_OPLUS_CHG=y"
-          } >> arch/arm64/configs/vendor/kona-perf_defconfig
-
-      - name: Configure Docker/LXC
-        run: |
-          cd kernel
-          curl -L https://raw.githubusercontent.com/dabao1955/kernel_build_action/main/lxc/config.py -o lxc_config.py
-          python3 lxc_config.py arch/arm64/configs/vendor/kona-perf_defconfig -w
+          ./scripts/config --objtree out --enable CONFIG_OVERLAY_FS
+          ./scripts/config --objtree out --enable CONFIG_CGROUP_BPF
+          ./scripts/config --objtree out --enable CONFIG_USB_SERIAL
+          ./scripts/config --objtree out --enable CONFIG_USB_SERIAL_CP210X
+          ./scripts/config --objtree out --enable CONFIG_USB_SERIAL_CH341
+          ./scripts/config --objtree out --enable CONFIG_USB_SERIAL_FTDI_SIO
+          ./scripts/config --objtree out --enable CONFIG_USB_STORAGE
+          ./scripts/config --objtree out --disable CONFIG_WERROR
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # Build su -j2 dėl RAM taupymo
+          # Kompiliuojame su -j2 (saugome RAM)
           make -j2 O=out ARCH=arm64 \
             CC=clang \
-            CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 \
             LLVM_IAS=1 \
-            KCFLAGS="-w -Wno-error" \
-            KCPPFLAGS="-D__ANDROID_COMMON_KERNEL__"
+            KCFLAGS="-w -Wno-error"
 
-      - name: Upload Kernel Image
+      - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: Image-OnePlus8T-HA-Server
+          name: Image-OnePlus8T-Server
           path: kernel/out/arch/arm64/boot/Image
