@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Docker Kernel
+name: Build OnePlus 8T HA-Server Kernel
 
 on:
   workflow_dispatch:
@@ -24,7 +24,7 @@ jobs:
         run: |
           git clone --depth 1 -b 14.0 https://github.com/crdroidandroid/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel (Fix Flash & Config)
+      - name: Patch Kernel
         run: |
           cd kernel
 
@@ -57,13 +57,12 @@ jobs:
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_USB_UAS=y"
-            echo "CONFIG_EXFAT_FS=y"
-            echo "CONFIG_NTFS_FS=y"
+            echo "CONFIG_OPLUS_CHG=y"
           } >> $DEFCONFIG
 
       - name: Build Kernel
@@ -79,14 +78,14 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             KCFLAGS="-w -Wno-error" \
-            KCPPFLAGS="-D__ANDROID_COMMON_KERNEL__" \
-            Image.gz dtbo.img dtbs
+            Image.gz dtbs
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Image-OnePlus8T-Full-Package
+          name: OnePlus8T-Server-Kernel
+          # Paimame branduolį ir visus DTB/DTBO failus (jie bus dts aplanke)
           path: |
-            kernel/out/arch/arm64/boot/Image*
-            kernel/out/arch/arm64/boot/dtbo.img
+            kernel/out/arch/arm64/boot/Image.gz
             kernel/out/arch/arm64/boot/dts/vendor/oplus/*.dtb
+            kernel/out/arch/arm64/boot/dts/vendor/oplus/*.dtbo
