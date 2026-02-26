@@ -1,11 +1,12 @@
-name: Build OnePlus 8T Server Kernel
+name: Build OnePlus 8T HA-Docker Kernel (Stable)
 
 on:
   workflow_dispatch:
 
 jobs:
   build-kernel:
-    runs-on: ubuntu-latest
+    # SVARBU: Naudojame 22.04, nes ant 24.04 toolchain'as "pjaunasi" su sistema
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,26 +16,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl
 
-      - name: Download Proton Clang (Safe Method)
+      - name: Download AOSP Clang 17
         run: |
-          git clone --depth=1 https://github.com/kdrag0n/proton-clang clang
+          mkdir -p $GITHUB_WORKSPACE/clang
+          # Naudojame oficialų Google Clang - jis stabiliausias
+          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz" -o clang.tar.gz
+          tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
       - name: Clone Kernel Source
         run: |
-          git clone --depth=1 -b 14.0 https://github.com/crdroidandroid/android_kernel_oneplus_sm8250 kernel
-      
-      - name: Patch Kernel for HA Server
+          # crDroid šaltinis - patikrintas darbinis arklys
+          git clone --depth 1 -b 14.0 https://github.com/crdroidandroid/android_kernel_oneplus_sm8250 kernel
+
+      - name: Patch Kernel
         run: |
           cd kernel
+          # 1. Sutvarkome lūžtantį flash vairuotoją
           echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
           
-          # 2. IŠTAISOME visas Linker klaidas (get_project, oplus_vooc ir t.t.)
-          # Sukuriame oplus_identity.c, kad branduolys sėkmingai susijungtų
-          cat <<EOF > drivers/soc/qcom/oplus_identity.c
+          # 2. IŠTAISOME Linker klaidas (Undefined symbols)
+          cat <<EOF > drivers/soc/qcom/oplus_stubs.c
           #include <linux/export.h>
           #include <linux/types.h>
-
           int get_project(void) { return 0; }
           EXPORT_SYMBOL(get_project);
           int is_project(int project) { return 0; }
@@ -66,28 +70,39 @@ jobs:
           int oplus_vooc_get_fastchg_ing(void) { return 0; }
           EXPORT_SYMBOL(oplus_vooc_get_fastchg_ing);
           EOF
-
-          echo "obj-y += oplus_identity.o" >> drivers/soc/qcom/Makefile
+          echo "obj-y += oplus_stubs.o" >> drivers/soc/qcom/Makefile
           
+          # 3. Konfigūracija
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
+          # Įjungiame Docker bazę
           ./scripts/config --objtree out --enable CONFIG_OVERLAY_FS
           ./scripts/config --objtree out --enable CONFIG_CGROUP_BPF
+          ./scripts/config --objtree out --enable CONFIG_MEMCG_SWAP
+          
+          # Įjungiame USB Serial (Zigbee lazdelėms)
           ./scripts/config --objtree out --enable CONFIG_USB_SERIAL
           ./scripts/config --objtree out --enable CONFIG_USB_SERIAL_CP210X
           ./scripts/config --objtree out --enable CONFIG_USB_SERIAL_CH341
           ./scripts/config --objtree out --enable CONFIG_USB_SERIAL_FTDI_SIO
+          ./scripts/config --objtree out --enable CONFIG_USB_SERIAL_OPTION
+          
+          # Įjungiame USB Storage (Išoriniams diskams)
           ./scripts/config --objtree out --enable CONFIG_USB_STORAGE
+          ./scripts/config --objtree out --enable CONFIG_EXFAT_FS
+          ./scripts/config --objtree out --enable CONFIG_NTFS_FS
+          
+          # Išjungiam WERROR ir paliekam Fast Charge
           ./scripts/config --objtree out --disable CONFIG_WERROR
+          ./scripts/config --objtree out --enable CONFIG_OPLUS_CHG
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          
-          # Kompiliuojame su -j2 (saugome RAM)
           make -j2 O=out ARCH=arm64 \
             CC=clang \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 \
