@@ -11,27 +11,27 @@ jobs:
       - name: Build
         uses: dabao1955/kernel_build_action@main
         with:
-          # 1. ŠALTINIS
+          # 1. ŠALTINIS (Naudojame stabilią ir patikrintą šaką)
           kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
           kernel-branch: lineage-21
           
-          # 2. KONFIGŪRACIJA
-          config: vendor/kona-perf_defconfig
+          # 2. KONFIGŪRACIJA (Lineage-21 šakoje šis failas yra pagrindinis)
+          config: kebab_defconfig
           arch: arm64
           vendor: false
           kernel-dir: .
 
-          # 3. ĮRANKIAI (Parinkta versija, kuri nesukelia 400 klaidos)
-          android-version: 11
+          # 3. ĮRANKIAI (Naudojame oficialų rinkinį be 400 klaidų)
+          android-version: 12
           aosp-gcc: true
           aosp-clang: true
-          aosp-clang-version: r383902 # "Auksinis standartas" 4.19 branduoliams
+          aosp-clang-version: r450784d # Labai stabili versija
 
-          # 4. DOCKER / LXC PALAIKYMAS (Tai įjungs visus tavo "missing" nustatymus)
+          # 4. DOCKER / LXC PALAIKYMAS (Viskas taps ŽALIA)
           lxc: true
           lxc-patch: false
           
           # 5. PAKAVIMAS IR ARGUMENTAI
           anykernel3: true
-          # Naudojame minimalius nustatymus, kad Makefile nesipyktų
-          extra-make-args: '["KCFLAGS=-w", "WERROR=0"]'
+          # Išjungiam "Integrated Assembler", kad išvengtume kodo konfliktų
+          extra-make-args: '["LLVM_IAS=0", "KCFLAGS=-w", "WERROR=0"]'
