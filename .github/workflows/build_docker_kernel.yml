@@ -10,10 +10,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Proton Clang
+      - name: Download ZyC Clang 23
         run: |
-          git clone https://github.com/kdrag0n/proton-clang.git --depth=1 $GITHUB_WORKSPACE/proton-clang
-          echo "$GITHUB_WORKSPACE/proton-clang/bin" >> $GITHUB_PATH
+          mkdir -p $GITHUB_WORKSPACE/clang
+          curl -L "https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz" -o clang.tar.gz
+          tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
+          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
       - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
@@ -26,7 +28,7 @@ jobs:
           kernel-dir: .
 
           aosp-gcc: true
-          aosp-clang: false 
+          aosp-clang: false
 
           lxc: true
           lxc-patch: false
@@ -35,6 +37,13 @@ jobs:
           extra-make-args: '[
             "LLVM=1",
             "LLVM_IAS=1",
+            "CC=clang",
+            "LD=ld.lld",
+            "AR=llvm-ar",
+            "NM=llvm-nm",
+            "OBJCOPY=llvm-objcopy",
+            "OBJDUMP=llvm-objdump",
+            "STRIP=llvm-strip",
             "CROSS_COMPILE=aarch64-linux-gnu-",
             "CROSS_COMPILE_ARM32=arm-linux-gnueabi-",
             "KCFLAGS=-w",
