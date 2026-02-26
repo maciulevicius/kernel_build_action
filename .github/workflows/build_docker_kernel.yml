@@ -24,23 +24,41 @@ jobs:
         run: |
           git clone --depth 1 -b 14.0 https://github.com/crdroidandroid/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel Config (Direct)
+      - name: Patch Kernel (Fix Flash & Config)
         run: |
           cd kernel
-          echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
+          # 1. Vietoj tuščio failo įrašome DUMMY funkcijas, kurių reikalauja krovimo modulis
+          # Tai ištaisys "undefined symbol: is_flash_active" ir kt.
+          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
+          #include <linux/module.h>
+          #include <linux/types.h>
+          bool is_flash_active(void) { return false; }
+          EXPORT_SYMBOL(is_flash_active);
+          int schgm_flash_torch_priority(int dummy) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_torch_priority);
+          int schgm_flash_init(void *dummy) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_init);
+          bool schgm_flash_get_vreg_ok(void) { return true; }
+          EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
+          int schgm_flash_ilim2_irq_handler(int irq, void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
+          int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
+          EOF
           
+          # 2. Konfigūracija
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
-          
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           
           {
             echo "CONFIG_WERROR=n"
             echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
+            # Docker reikalavimai
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-            echo "CONFIG_BLK_DEV_THROTTLING=y"
+            # USB Serial Zigbee (Visi galimi draiveriai)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
@@ -58,9 +76,9 @@ jobs:
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
+          # Naudojame -j2, kad nepritruktų RAM
           make -j2 O=out ARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
