@@ -28,7 +28,7 @@ jobs:
 
           aosp-gcc: true
           aosp-clang: true
-          aosp-clang-version: r383902
+          aosp-clang-version: r450784d
 
           lxc: true
           lxc-patch: false
