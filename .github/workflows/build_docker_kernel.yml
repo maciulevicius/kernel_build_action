@@ -20,20 +20,20 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/clang
           curl -L "https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz" -o clang.tar.gz
           tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
+          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
       - name: Clone and Patch Kernel
         run: |
           git clone --recursive -b lineage-23.2 --depth 1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
-          # Ištaisome krovimo klaidą padarydami failą tuščią
           echo "/* empty */" > kernel/drivers/power/supply/qcom/schgm-flash.c
-          # Išjungiame WERROR (kad įspėjimai netaptų klaidomis)
+          sed -i 's/CONFIG_OPLUS_DISPLAY_SUPPORT=y/CONFIG_OPLUS_DISPLAY_SUPPORT=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
+          sed -i 's/CONFIG_OPLUS_CHG=y/CONFIG_OPLUS_CHG=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
           echo "CONFIG_WERROR=n" >> kernel/arch/arm64/configs/vendor/kona-perf_defconfig
 
       - name: Configure Docker/LXC (Manually)
         run: |
           cd kernel
-          # Atsisiunčiame LXC konfigūravimo skriptą tiesiai
           curl -L https://raw.githubusercontent.com/dabao1955/kernel_build_action/main/lxc/config.py -o lxc_config.py
           python3 lxc_config.py arch/arm64/configs/vendor/kona-perf_defconfig -w
 
@@ -42,7 +42,8 @@ jobs:
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          make -j$(nproc --all) O=out ARCH=arm64 \
+          # Naudojame -j$(nproc) vietoj --all, kad išvengtume "Broken pipe" dėl resursų trūkumo
+          make -j$(nproc) O=out ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -54,5 +55,5 @@ jobs:
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: Image-OnePlus8T
+          name: Image-OnePlus8T-Android16
           path: kernel/out/arch/arm64/boot/Image
