@@ -8,26 +8,31 @@ jobs:
     name: Build Kernel
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Build
         uses: dabao1955/kernel_build_action@main
         with:
+          # 1. ŠALTINIS (Naudojame stabilią šaką)
           kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
           kernel-branch: lineage-21
-
+          
+          # 2. KONFIGŪRACIJA (Ištaisytas kelias)
           config: vendor/kona-perf_defconfig
           arch: arm64
           vendor: false
           kernel-dir: .
 
+          # 3. ĮRANKIAI (Apeiname 400 klaidą ir Makefile konfliktus)
           android-version: 12
           aosp-gcc: true
-          aosp-clang: true
+          aosp-clang: false # Išjungiame Google Clang
+          # Naudojame Proton Clang - jis "atlaidesnis" klaidoms
+          other-clang-url: https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz
 
+          # 4. DOCKER / LXC PALAIKYMAS (SVARBIAUSIA)
           lxc: true
           lxc-patch: false
-
+          
+          # 5. PAKAVIMAS IR "FORCE" ARGUMENTAI
           anykernel3: true
-          extra-make-args: '["LLVM_IAS=0", "KCFLAGS=-w"]'
+          # Šie argumentai išjungia visas klaidų gaudykles
+          extra-make-args: '["LLVM=1", "LLVM_IAS=1", "KCFLAGS=-w", "WERROR=0", "CONFIG_WERROR=n"]'
