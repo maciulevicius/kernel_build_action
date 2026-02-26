@@ -18,20 +18,29 @@ jobs:
       - name: Download ZyC Clang 23
         run: |
           mkdir -p $GITHUB_WORKSPACE/clang
-          curl -L "https://github.com/ZyCromerZ/Clang/releases/download/23.0.0git-20260130-release/Clang-23.0.0git-20260130.tar.gz" -o clang.tar.gz
+          curl -L "https://github.com/ZyCromerZ/Clang/releases/download/18.0.0git-20240124-release/Clang-18.0.0git-20240124.tar.gz" -o clang.tar.gz
           tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone and Patch Kernel
+      - name: Clone Kernel
         run: |
           git clone --recursive -b lineage-23.2 --depth 1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
-          echo "/* empty */" > kernel/drivers/power/supply/qcom/schgm-flash.c
-          sed -i 's/CONFIG_OPLUS_DISPLAY_SUPPORT=y/CONFIG_OPLUS_DISPLAY_SUPPORT=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
-          sed -i 's/CONFIG_OPLUS_CHG=y/CONFIG_OPLUS_CHG=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' kernel/arch/arm64/configs/vendor/kona-perf_defconfig
-          echo "CONFIG_WERROR=n" >> kernel/arch/arm64/configs/vendor/kona-perf_defconfig
+      
+      - name: Patch Kernel for Docker & Stability
+        run: |
+          cd kernel
+          echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
+          
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' arch/arm64/configs/vendor/kona-perf_defconfig
+          echo "CONFIG_WERROR=n" >> arch/arm64/configs/vendor/kona-perf_defconfig
+          echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y" >> arch/arm64/configs/vendor/kona-perf_defconfig
+          
+          echo "CONFIG_OVERLAY_FS=y" >> arch/arm64/configs/vendor/kona-perf_defconfig
+          echo "CONFIG_CGROUP_BPF=y" >> arch/arm64/configs/vendor/kona-perf_defconfig
+          echo "CONFIG_MEMCG_SWAP=y" >> arch/arm64/configs/vendor/kona-perf_defconfig
+          echo "CONFIG_BLK_DEV_THROTTLING=y" >> arch/arm64/configs/vendor/kona-perf_defconfig
 
-      - name: Configure Docker/LXC (Manually)
+      - name: Configure Docker/LXC
         run: |
           cd kernel
           curl -L https://raw.githubusercontent.com/dabao1955/kernel_build_action/main/lxc/config.py -o lxc_config.py
@@ -41,19 +50,22 @@ jobs:
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          # Naudojame -j$(nproc) vietoj --all, kad išvengtume "Broken pipe" dėl resursų trūkumo
-          make -j$(nproc) O=out ARCH=arm64 \
+          
+
+          make -j2 O=out ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 \
             LLVM_IAS=1 \
-            KCFLAGS="-w"
+            KCFLAGS="-w -Wno-error" \
+            KCPPFLAGS="-D__ANDROID_COMMON_KERNEL__"
 
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: Image-OnePlus8T-Android16
+          name: Image-OnePlus8T-Docker
           path: kernel/out/arch/arm64/boot/Image
