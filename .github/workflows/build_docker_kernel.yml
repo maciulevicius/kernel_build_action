@@ -27,11 +27,9 @@ jobs:
       - name: Patch Kernel (Fix Flash & Config)
         run: |
           cd kernel
-          # 1. Vietoj tuščio failo įrašome DUMMY funkcijas, kurių reikalauja krovimo modulis
-          # Tai ištaisys "undefined symbol: is_flash_active" ir kt.
+
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
-          #include <linux/module.h>
-          #include <linux/types.h>
+
           bool is_flash_active(void) { return false; }
           EXPORT_SYMBOL(is_flash_active);
           int schgm_flash_torch_priority(int dummy) { return 0; }
@@ -45,27 +43,23 @@ jobs:
           int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
-          
-          # 2. Konfigūracija
+
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           
           {
             echo "CONFIG_WERROR=n"
             echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
-            # Docker reikalavimai
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-            # USB Serial Zigbee (Visi galimi draiveriai)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
-            # Išoriniai diskai
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_USB_UAS=y"
             echo "CONFIG_EXFAT_FS=y"
@@ -78,7 +72,6 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # Naudojame -j2, kad nepritruktų RAM
           make -j2 O=out ARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -86,15 +79,14 @@ jobs:
             LLVM=1 \
             LLVM_IAS=1 \
             KCFLAGS="-w -Wno-error" \
-            KCPPFLAGS="-D__ANDROID_COMMON_KERNEL__"
+            KCPPFLAGS="-D__ANDROID_COMMON_KERNEL__" \
+            Image.gz dtbo.img dtbs
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Docker-Kernel-Full
+          name: Image-OnePlus8T-Full-Package
           path: |
-            kernel/out/arch/arm64/boot/Image
-            kernel/out/arch/arm64/boot/Image.gz
-            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/arch/arm64/boot/Image*
             kernel/out/arch/arm64/boot/dtbo.img
-            kernel/out/arch/arm64/boot/dtb.img
+            kernel/out/arch/arm64/boot/dts/vendor/oplus/*.dtb
