@@ -11,29 +11,27 @@ jobs:
       - name: Build
         uses: dabao1955/kernel_build_action@main
         with:
-          # 1. ŠALTINIS (Naudojame stabilią šaką, kad išvengtume kodo klaidų)
+          # 1. ŠALTINIS
           kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
           kernel-branch: lineage-21
           
-          # 2. KONFIGŪRACIJA (Garantuotas kelias iki kona-perf_defconfig)
+          # 2. KONFIGŪRACIJA
           config: vendor/kona-perf_defconfig
           arch: arm64
           vendor: false
           kernel-dir: .
 
-          # 3. ĮRANKIAI (Apeiname 400 klaidą)
-          android-version: 12
+          # 3. ĮRANKIAI (Parinkta versija, kuri nesukelia 400 klaidos)
+          android-version: 11
           aosp-gcc: true
-          # Išjungiame probleminį Google Clang
-          aosp-clang: false
-          # Naudojame Proton Clang - jis atsisiunčia be klaidų ir veikia puikiai
-          other-clang-url: https://github.com/kdrag0n/proton-clang/archive/refs/heads/master.tar.gz
+          aosp-clang: true
+          aosp-clang-version: r383902 # "Auksinis standartas" 4.19 branduoliams
 
-          # 4. DOCKER / LXC PALAIKYMAS (Tai sutvarkys tuos "missing" PID_NS ir kt.)
+          # 4. DOCKER / LXC PALAIKYMAS (Tai įjungs visus tavo "missing" nustatymus)
           lxc: true
           lxc-patch: false
           
-          # 5. PAKAVIMAS IR KLIPAI
+          # 5. PAKAVIMAS IR ARGUMENTAI
           anykernel3: true
-          # Naudojame tik minimalius nustatymus, kad Makefile nesipyktų
+          # Naudojame minimalius nustatymus, kad Makefile nesipyktų
           extra-make-args: '["KCFLAGS=-w", "WERROR=0"]'
