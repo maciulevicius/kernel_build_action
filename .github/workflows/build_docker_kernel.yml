@@ -27,7 +27,7 @@ jobs:
           vendor: false
           kernel-dir: .
 
-          aosp-gcc: true
+          aosp-gcc: false
           aosp-clang: false
 
           lxc: true
