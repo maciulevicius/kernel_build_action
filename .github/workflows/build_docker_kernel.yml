@@ -7,28 +7,26 @@ jobs:
   build-kernel:
     runs-on: ubuntu-latest
     steps:
-      
-      - name: Install dependencies
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Proton Clang
         run: |
-          sudo apt-get update
-          sudo apt-get install -y coccinelle
-      
+          git clone https://github.com/kdrag0n/proton-clang.git --depth=1 $GITHUB_WORKSPACE/proton-clang
+          echo "$GITHUB_WORKSPACE/proton-clang/bin" >> $GITHUB_PATH
+
       - name: Build Kernel
         uses: dabao1955/kernel_build_action@main
         with:
           kernel-url: https://github.com/LineageOS/android_kernel_oneplus_sm8250
           kernel-branch: lineage-23.2
-
           config: vendor/kona-perf_defconfig
           arch: arm64
           vendor: false
           kernel-dir: .
 
-          android-version:
-
           aosp-gcc: true
-          aosp-clang: true
-          aosp-clang-version: r416183b
+          aosp-clang: false 
 
           lxc: true
           lxc-patch: false
@@ -37,6 +35,8 @@ jobs:
           extra-make-args: '[
             "LLVM=1",
             "LLVM_IAS=1",
+            "CROSS_COMPILE=aarch64-linux-gnu-",
+            "CROSS_COMPILE_ARM32=arm-linux-gnueabi-",
             "KCFLAGS=-w",
             "WERROR=0"
             ]'
