@@ -1,4 +1,4 @@
-name: Build OnePlus 8T Docker Kernel
+name: Build OnePlus 8T HA-Docker Kernel
 
 on:
   workflow_dispatch:
@@ -18,8 +18,7 @@ jobs:
       - name: Download ZyC Clang 18
         run: |
           mkdir -p $GITHUB_WORKSPACE/clang
-          # Naudojame tavo pasirinktą ZyC Clang 18 versiją
-          curl -L "https://github.com/ZyCromerZ/Clang/releases/download/18.0.0git-20240124-release/Clang-18.0.0git-20240124.tar.gz" -o clang.tar.gz
+          curl -L "https://github.com/ZyCromerZ/Clang/releases/download/18.1.8-release/Clang-18.1.8.tar.gz" -o clang.tar.gz
           tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
@@ -27,50 +26,74 @@ jobs:
         run: |
           git clone --recursive -b lineage-23.2 --depth 1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
       
-      - name: Patch Kernel for Docker & FastCharge
+      - name: Patch Kernel for HA Server (Docker + USB + FastCharge)
         run: |
           cd kernel
           # 1. Sutvarkome lūžtantį flash vairuotoją
           echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
           
-          # 2. IŠTAISOME "undefined symbol" klaidas (get_project ir kt.)
-          # Tai sukuria nedidelį failą su trūkstamomis funkcijomis, kad linkeris neberėktų.
-          # Tai būtina, nes LineageOS kode trūksta šių Oplus sąsajų.
-          cat <<EOF > drivers/soc/qcom/oplus_identity.c
+          # 2. IŠTAISOME visas Linker klaidas (Undefined symbols)
+          cat <<EOF > drivers/soc/qcom/oplus_server_stubs.c
           #include <linux/export.h>
           #include <linux/types.h>
 
           int get_project(void) { return 0; }
           EXPORT_SYMBOL(get_project);
-
           int is_project(int project) { return 0; }
           EXPORT_SYMBOL(is_project);
-
           int get_boot_mode(void) { return 0; }
           EXPORT_SYMBOL(get_boot_mode);
-
           int get_PCB_Version(void) { return 0; }
           EXPORT_SYMBOL(get_PCB_Version);
-          
           int qpnp_is_power_off_charging(void) { return 0; }
           EXPORT_SYMBOL(qpnp_is_power_off_charging);
+          void msm_drm_notifier_call_chain(unsigned long val, void *v) { }
+          EXPORT_SYMBOL(msm_drm_notifier_call_chain);
+          void switch_headset_state(int state) { }
+          EXPORT_SYMBOL(switch_headset_state);
+          void opticalfp_irq_handler_register(void *data) { }
+          EXPORT_SYMBOL(opticalfp_irq_handler_register);
+          int oplus_gauge_init(void *data) { return 0; }
+          EXPORT_SYMBOL(oplus_gauge_init);
+          void switch_to_otg_mode(int enable) { }
+          EXPORT_SYMBOL(switch_to_otg_mode);
+          void opchg_set_pd_sdp(int enable) { }
+          EXPORT_SYMBOL(opchg_set_pd_sdp);
+          void oplus_vooc_adapter_update_is_rx_gpio(void *data) { }
+          EXPORT_SYMBOL(oplus_vooc_adapter_update_is_rx_gpio);
+          void oplus_vooc_adapter_update_is_tx_gpio(void *data) { }
+          EXPORT_SYMBOL(oplus_vooc_adapter_update_is_tx_gpio);
+          int oplus_vooc_get_fastchg_started(void) { return 0; }
+          EXPORT_SYMBOL(oplus_vooc_get_fastchg_started);
+          int oplus_vooc_get_fastchg_ing(void) { return 0; }
+          EXPORT_SYMBOL(oplus_vooc_get_fastchg_ing);
           EOF
 
-          # Įtraukiame šį failą į kompiliavimo sąrašą
-          echo "obj-y += oplus_identity.o" >> drivers/soc/qcom/Makefile
+          echo "obj-y += oplus_server_stubs.o" >> drivers/soc/qcom/Makefile
           
-          # 3. Konfigūruojame defconfig
-          # Išjungiam WERROR, kad neblokuotų buildo dėl įspėjimų
+          # 3. Konfigūruojame defconfig Zigbee ir Diskams
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' arch/arm64/configs/vendor/kona-perf_defconfig
           
-          # Pridedame Docker ir stabilumo nustatymus
           {
             echo "CONFIG_WERROR=n"
             echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
+            # Docker bazė
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
-            echo "CONFIG_MEMCG_SWAP=y"
-            echo "CONFIG_BLK_DEV_THROTTLING=y"
+            # USB Serial (Zigbee lazdelėms: CP210x, FTDI, CH341)
+            echo "CONFIG_USB_SERIAL=y"
+            echo "CONFIG_USB_SERIAL_CONSOLE=y"
+            echo "CONFIG_USB_SERIAL_GENERIC=y"
+            echo "CONFIG_USB_SERIAL_CP210X=y"
+            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_OPTION=y"
+            # USB Storage (Diskams)
+            echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_USB_UAS=y"
+            echo "CONFIG_EXFAT_FS=y"
+            echo "CONFIG_NTFS_FS=y"
+            # Fast Charge palaikymas
             echo "CONFIG_OPLUS_CHG=y"
           } >> arch/arm64/configs/vendor/kona-perf_defconfig
 
@@ -84,11 +107,9 @@ jobs:
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          
-          # Generuojame pradinę konfigūraciją
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # Kompiliuojame (Naudojame -j2, kad nepritruktų RAM)
+          # Build su -j2 dėl RAM taupymo
           make -j2 O=out ARCH=arm64 \
             CC=clang \
             CLANG_TRIPLE=aarch64-linux-gnu- \
@@ -102,5 +123,5 @@ jobs:
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: Image-OnePlus8T-Docker
+          name: Image-OnePlus8T-HA-Server
           path: kernel/out/arch/arm64/boot/Image
