@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Docker Kernel (The One)
+name: Build OnePlus 8T HA-Server Kernel (Flashable ZIP)
 
 on:
   workflow_dispatch:
@@ -15,20 +15,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
-      - name: Clone Proton Clang
+      - name: Clone Toolchain
         run: |
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
       - name: Clone Kernel Source
         run: |
-          # Naudojame tavo LineageOS 23.2 šaltinį
           git clone --depth 1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
 
       - name: Patch Kernel
         run: |
           cd kernel
-          # 1. Sutvarkome blykstės vairuotoją (kad linkeris rastų funkcijas)
+          # 1. Sutvarkome blykstės vairuotoją
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/types.h>
           #include <linux/export.h>
@@ -47,7 +46,7 @@ jobs:
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
 
-          # 2. Sutvarkome Oplus tapatybės funkcijas (kad linkeris neberėktų)
+          # 2. Sutvarkome Oplus tapatybės funkcijas
           cat <<EOF > drivers/soc/qcom/oplus_fix.c
           #include <linux/export.h>
           #include <linux/types.h>
@@ -84,11 +83,12 @@ jobs:
           EOF
           echo "obj-y += oplus_fix.o" >> drivers/soc/qcom/Makefile
           
-          # 3. Konfigūracija
+          # 3. Konfigūracija HA serveriui
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           {
             echo "CONFIG_WERROR=n"
+            echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_USB_SERIAL=y"
@@ -118,17 +118,17 @@ jobs:
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3
           cd AnyKernel3
           cp ../kernel/out/arch/arm64/boot/Image.gz .
-          # Surenkame DTB failus (USB palaikymui)
+          # Surenkame DTB/DTBO
           find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} . \;
-          # Surenkame DTBO failus
           find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} . \;
-          # Konfigūruojame 8T (Kebab)
-          sed -i 's/device.name1=maguro/device.name1=oneplus8t/g' anykernel.sh
-          sed -i 's/device.name2=toro/device.name2=kebab/g' anykernel.sh
+          
+          # IŠJUNGIAME įrenginio tikrinimą (kad nebūtų "unsupported device")
+          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+          
           zip -r ../OnePlus8T-Docker-Kernel.zip *
 
       - name: Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Docker-Kernel-ZIP
+          name: OnePlus8T-HA-Kernel-ZIP
           path: OnePlus8T-Docker-Kernel.zip
