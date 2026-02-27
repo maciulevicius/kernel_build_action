@@ -1,0 +1,114 @@
+name: Build OnePlus 8T HA-Server Kernel (Last)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
+
+      - name: Clone Toolchain
+        run: |
+          git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
+          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
+
+      - name: Clone Kernel Source
+        run: |
+          # Grįžtame prie LOS 23.2 šaltinio, nes tavo sistema yra Android 16
+          git clone --depth 1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
+
+      - name: Patch Kernel (Fix Symbols & Config)
+        run: |
+          cd kernel
+          # 1. Sutvarkome blykstės klaidą
+          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
+          #include <linux/types.h>
+          #include <linux/export.h>
+          #include <linux/kernel.h>
+          bool is_flash_active(void) { return false; }
+          EXPORT_SYMBOL(is_flash_active);
+          int schgm_flash_torch_priority(int level) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_torch_priority);
+          int schgm_flash_init(void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_init);
+          bool schgm_flash_get_vreg_ok(void) { return true; }
+          EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
+          int schgm_flash_ilim2_irq_handler(int irq, void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
+          int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
+          EOF
+
+          # 2. Įrašome trūkstamus Oplus simbolius (LOS 23.2 jų neturi)
+          cat <<EOF > drivers/soc/qcom/oplus_stubs.c
+          #include <linux/export.h>
+          #include <linux/types.h>
+          int get_project(void) { return 0; }
+          EXPORT_SYMBOL(get_project);
+          int is_project(int project) { return 0; }
+          EXPORT_SYMBOL(is_project);
+          int get_boot_mode(void) { return 0; }
+          EXPORT_SYMBOL(get_boot_mode);
+          int get_PCB_Version(void) { return 0; }
+          EXPORT_SYMBOL(get_PCB_Version);
+          int qpnp_is_power_off_charging(void) { return 0; }
+          EXPORT_SYMBOL(qpnp_is_power_off_charging);
+          void msm_drm_notifier_call_chain(unsigned long val, void *v) { }
+          EXPORT_SYMBOL(msm_drm_notifier_call_chain);
+          EOF
+          echo "obj-y += oplus_stubs.o" >> drivers/soc/qcom/Makefile
+          
+          # 3. Konfigūracija Docker'iui ir USB Zigbee
+          DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
+          {
+            echo "CONFIG_OVERLAY_FS=y"
+            echo "CONFIG_CGROUP_BPF=y"
+            echo "CONFIG_USB_SERIAL=y"
+            echo "CONFIG_USB_SERIAL_CP210X=y"
+            echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_OPTION=y"
+            echo "CONFIG_USB_STORAGE=y"
+          } >> $DEFCONFIG
+
+      - name: Build Kernel
+        run: |
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          make O=out ARCH=arm64 vendor/kona-perf_defconfig
+          make O=out ARCH=arm64 olddefconfig
+          make -j2 O=out ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            KCFLAGS="-w -Wno-error" \
+            Image.gz dtbs
+
+      - name: Package with AnyKernel3
+        run: |
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          cd AnyKernel3
+          cp ../kernel/out/arch/arm64/boot/Image.gz .
+          # Surenkame DTB failus (reikia Zigbee veikimui)
+          find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} . \;
+          # Konfigūruojame OnePlus 8T (kebab)
+          sed -i 's/device.name1=maguro/device.name1=oneplus8t/g' anykernel.sh
+          sed -i 's/device.name2=toro/device.name2=kebab/g' anykernel.sh
+          zip -r ../OnePlus8T-Docker-Kernel.zip *
+
+      - name: Upload Final ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Kernel-OnePlus8T-Docker-ZIP
+          path: OnePlus8T-Docker-Kernel.zip
