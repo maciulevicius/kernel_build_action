@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel (Full Pack)
+name: Build OnePlus 8T HA-Server Kernel (Flashable)
 
 on:
   workflow_dispatch:
@@ -13,7 +13,8 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2
+          # Pridedame python2-minimal
+          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
       - name: Clone Proton Clang
         run: |
@@ -24,9 +25,10 @@ jobs:
         run: |
           git clone --depth 1 -b 14.0 https://github.com/crdroidandroid/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel
+      - name: Patch Kernel (Stubs & Config)
         run: |
           cd kernel
+          # Sutvarkome blykstės klaidą
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/types.h>
           #include <linux/export.h>
@@ -50,16 +52,20 @@ jobs:
           {
             echo "CONFIG_WERROR=n"
             echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
+            # Docker bazė
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
-            echo "CONFIG_MEMCG_SWAP=y"
-            echo "CONFIG_MEMCG_SWAP_ENABLED=y"
+            # USB Serial Zigbee lazdelėms
             echo "CONFIG_USB_SERIAL=y"
+            echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
+            # Išoriniai diskai
             echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_EXFAT_FS=y"
+            echo "CONFIG_NTFS_FS=y"
             echo "CONFIG_OPLUS_CHG=y"
           } >> $DEFCONFIG
 
@@ -69,6 +75,8 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
+          
+          # Kompiliuojame branduolį ir medžius
           make -j2 O=out ARCH=arm64 \
             CC=clang \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -77,13 +85,14 @@ jobs:
             LLVM_IAS=1 \
             KCFLAGS="-w -Wno-error" \
             Image.gz dtbs
+          
+          # Sukuriame dtbo.img (Naudojame python3, dauguma šių skriptų su juo veikia)
+          python3 scripts/dtc/libufdt/utils/src/mkdtboimg.py create out/arch/arm64/boot/dtbo.img out/arch/arm64/boot/dts/vendor/oplus/*.dtbo
 
-          python2 scripts/dtc/libufdt/utils/src/mkdtboimg.py create out/arch/arm64/boot/dtbo.img out/arch/arm64/boot/dts/vendor/oplus/*.dtbo
-
-      - name: Upload Artifacts
+      - name: Upload Files
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Server-Kernel
+          name: OnePlus8T-Server-Kernel-Files
           path: |
             kernel/out/arch/arm64/boot/Image.gz
             kernel/out/arch/arm64/boot/dtbo.img
