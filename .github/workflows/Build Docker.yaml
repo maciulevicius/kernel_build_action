@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel (Flashable ZIP)
+name: Build OnePlus 8T HA-Server Kernel (Full Pack)
 
 on:
   workflow_dispatch:
@@ -13,9 +13,9 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip
+          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2
 
-      - name: Clone Toolchain
+      - name: Clone Proton Clang
         run: |
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
@@ -27,7 +27,6 @@ jobs:
       - name: Patch Kernel
         run: |
           cd kernel
-
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/types.h>
           #include <linux/export.h>
@@ -45,32 +44,26 @@ jobs:
           int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
-
+          
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           {
             echo "CONFIG_WERROR=n"
             echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
-
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-
             echo "CONFIG_USB_SERIAL=y"
-            echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
-
             echo "CONFIG_USB_STORAGE=y"
-            echo "CONFIG_EXFAT_FS=y"
-            echo "CONFIG_NTFS_FS=y"
             echo "CONFIG_OPLUS_CHG=y"
           } >> $DEFCONFIG
 
-      - name: Build Kernel
+      - name: Build Kernel and DTBO
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
@@ -85,23 +78,12 @@ jobs:
             KCFLAGS="-w -Wno-error" \
             Image.gz dtbs
 
-      - name: Package with AnyKernel3
-        run: |
-          git clone https://github.com/osm0sis/AnyKernel3 AnyKernel3
-          cd AnyKernel3
-          rm -rf .git
-          # Nukopijuojame sukompiliuotą branduolį
-          cp ../kernel/out/arch/arm64/boot/Image.gz .
-          find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} . \;
+          python2 scripts/dtc/libufdt/utils/src/mkdtboimg.py create out/arch/arm64/boot/dtbo.img out/arch/arm64/boot/dts/vendor/oplus/*.dtbo
 
-          sed -i 's/device.name1=maguro/device.name1=oneplus8t/g' anykernel.sh
-          sed -i 's/device.name2=toro/device.name2=kebab/g' anykernel.sh
-          sed -i 's/device.name3=toroplus/device.name3=OnePlus8T/g' anykernel.sh
-
-          zip -r ../OnePlus8T-HA-Server-Kernel.zip *
-
-      - name: Upload Flashable ZIP
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Kernel-Flashable
-          path: OnePlus8T-HA-Server-Kernel.zip
+          name: OnePlus8T-Server-Kernel
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz
+            kernel/out/arch/arm64/boot/dtbo.img
