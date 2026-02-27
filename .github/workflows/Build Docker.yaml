@@ -68,6 +68,7 @@ jobs:
             echo "CONFIG_USB_UAS=y"
             echo "CONFIG_EXFAT_FS=y"
             echo "CONFIG_NTFS_FS=y"
+            echo "CONFIG_OPLUS_CHG=y"
           } >> $DEFCONFIG
 
       - name: Build Kernel and DTBS
@@ -85,26 +86,29 @@ jobs:
             KCFLAGS="-w -Wno-error" \
             Image.gz dtbs
 
-      - name: Create DTBO Image
+      - name: Create DTBO Image (Auto-Search)
         run: |
           cd kernel
-          # Surandame mkdtboimg.py skriptą automatiškai
-          MKDTBO=$(find . -name "mkdtboimg.py" | head -n 1)
-          if [ -z "$MKDTBO" ]; then
-            # Jei skripto nėra branduolyje, atsisiunčiame jį iš AOSP
-            curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
-            # Failas ateina base64 formatu, jį reikia iškoduoti
-            python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg.py_real
-            MKDTBO="./mkdtboimg.py_real"
+          # Atsisiunčiame mkdtboimg.py (nes jis patikimiausias)
+          curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
+          python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg_real.py
+          
+          # AUTOMATIŠKAI surandame visus sugeneruotus .dtbo failus
+          DTBO_FILES=$(find out/arch/arm64/boot/dts/ -name "*.dtbo")
+          
+          if [ -z "$DTBO_FILES" ]; then
+            echo "KLAIDA: Nerasta jokių .dtbo failų!"
+            exit 1
           fi
           
           # Sukuriame dtbo.img
-          python3 $MKDTBO create out/arch/arm64/boot/dtbo.img out/arch/arm64/boot/dts/vendor/oplus/*.dtbo
+          python3 mkdtboimg_real.py create out/arch/arm64/boot/dtbo.img $DTBO_FILES
+          echo "dtbo.img sukurtas sėkmingai!"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-HA-Server-Kernel
+          name: OnePlus8T-Server-Kernel-Files
           path: |
             kernel/out/arch/arm64/boot/Image.gz
             kernel/out/arch/arm64/boot/dtbo.img
