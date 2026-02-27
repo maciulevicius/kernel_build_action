@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel
+name: Build OnePlus 8T HA-Docker Kernel (The One)
 
 on:
   workflow_dispatch:
@@ -22,13 +22,13 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          # Naudojame LineageOS 23.2 šaltinį
+          # Naudojame tavo LineageOS 23.2 šaltinį
           git clone --depth 1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel (The Ultimate Fix)
+      - name: Patch Kernel
         run: |
           cd kernel
-          # 1. Sutvarkome lūžtantį flash vairuotoją (Blykstės funkcijos)
+          # 1. Sutvarkome blykstės vairuotoją (kad linkeris rastų funkcijas)
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/types.h>
           #include <linux/export.h>
@@ -46,9 +46,8 @@ jobs:
           int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
-          
-          # 2. IŠTAISOME VISAS LINKER KLAIDAS (get_project, oplus_gauge ir t.t.)
-          # Šitas failas užpildo visas "Undefined symbol" skyles
+
+          # 2. Sutvarkome Oplus tapatybės funkcijas (kad linkeris neberėktų)
           cat <<EOF > drivers/soc/qcom/oplus_fix.c
           #include <linux/export.h>
           #include <linux/types.h>
@@ -84,7 +83,7 @@ jobs:
           EXPORT_SYMBOL(oplus_vooc_get_fastchg_ing);
           EOF
           echo "obj-y += oplus_fix.o" >> drivers/soc/qcom/Makefile
-
+          
           # 3. Konfigūracija
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
@@ -96,7 +95,6 @@ jobs:
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
-            echo "CONFIG_USB_SERIAL_OPTION=y"
             echo "CONFIG_USB_STORAGE=y"
           } >> $DEFCONFIG
 
@@ -115,19 +113,22 @@ jobs:
             KCFLAGS="-w -Wno-error" \
             Image.gz dtbs
 
-      - name: Package with AnyKernel3
+      - name: Package AnyKernel3
         run: |
-          git clone --depth 1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
+          git clone --depth 1 https://github.com/osm0sis/AnyKernel3
           cd AnyKernel3
           cp ../kernel/out/arch/arm64/boot/Image.gz .
-          # Nukopijuojame DTB (Zigbee palaikymui)
+          # Surenkame DTB failus (USB palaikymui)
           find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} . \;
-          # Surenkame DTBO (OnePlus specifikai)
+          # Surenkame DTBO failus
           find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} . \;
-          zip -r ../OnePlus8T-HA-Kernel.zip *
+          # Konfigūruojame 8T (Kebab)
+          sed -i 's/device.name1=maguro/device.name1=oneplus8t/g' anykernel.sh
+          sed -i 's/device.name2=toro/device.name2=kebab/g' anykernel.sh
+          zip -r ../OnePlus8T-Docker-Kernel.zip *
 
-      - name: Upload Final ZIP
+      - name: Upload ZIP
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-HA-Docker-ZIP
-          path: OnePlus8T-HA-Kernel.zip
+          name: OnePlus8T-Docker-Kernel-ZIP
+          path: OnePlus8T-Docker-Kernel.zip
