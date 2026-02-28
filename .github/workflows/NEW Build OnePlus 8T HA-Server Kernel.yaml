@@ -1,4 +1,4 @@
-name: Build OnePlus 8T Server Kernel (Clean Build) NEW
+name: Build OnePlus 8T Server Only Kernel (Clean Build)
 
 on:
   workflow_dispatch:
