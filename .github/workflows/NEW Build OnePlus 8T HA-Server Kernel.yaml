@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel (Flashable ZIP) NEW
+name: Build OnePlus 8T HA-Server Kernel NEW
 
 on:
   workflow_dispatch:
@@ -15,19 +15,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
-      - name: Clone Toolchain
+      - name: Clone Proton Clang
         run: |
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
       - name: Clone Kernel Source
         run: |
+          # Naudojame LOS 23.2, nes tavo OS yra Android 16
           git clone --depth 1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel
+      - name: Patch Kernel (Fix Symbols & Config)
         run: |
           cd kernel
-          # 1. Blykstės kodo sutvarkymas
+          # 1. Sutvarkome blykstės vairuotoją (kad linkeris rastų funkcijas)
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/types.h>
           #include <linux/export.h>
@@ -46,7 +47,7 @@ jobs:
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
 
-          # 2. Oplus simbolių sutvarkymas
+          # 2. Sutvarkome Oplus tapatybės funkcijas (kad linkeris neberėktų)
           cat <<EOF > drivers/soc/qcom/oplus_fix.c
           #include <linux/export.h>
           #include <linux/types.h>
@@ -88,16 +89,19 @@ jobs:
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           {
             echo "CONFIG_WERROR=n"
+            echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_OPTION=y"
             echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_OPLUS_CHG=y"
           } >> $DEFCONFIG
 
-      - name: Build Kernel
+      - name: Build Kernel and DTBS
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
@@ -112,26 +116,19 @@ jobs:
             KCFLAGS="-w -Wno-error" \
             Image.gz dtbs
 
-      - name: Package AnyKernel3
+      - name: Create DTBO Image
         run: |
-          git clone --depth 1 https://github.com/osm0sis/AnyKernel3
-          cd AnyKernel3
-          cp ../kernel/out/arch/arm64/boot/Image.gz .
-          find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} . \;
-          find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} . \;
-          
-          # ČIA SUTVARKOME TAVO KLAIDĄ:
-          # Pakeičiame tą nesąmoningą omap kelią į tikrą OnePlus 8T kelią
-          sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot|block=/dev/block/by-name/boot|g' anykernel.sh
-          
-          # Išjungiam prietaiso tikrinimą ir įjungiam slotų palaikymą
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-          sed -i 's/is_slot_device=0/is_slot_device=1/g' anykernel.sh
-          
-          zip -r ../OnePlus8T-Docker-Kernel.zip *
+          cd kernel
+          # Atsisiunčiame mkdtboimg.py
+          curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
+          python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg.py
+          # Sukuriame dtbo.img
+          python3 mkdtboimg.py create out/arch/arm64/boot/dtbo.img $(find out/arch/arm64/boot/dts/ -name "*.dtbo")
 
-      - name: Upload ZIP
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-HA-Kernel-ZIP
-          path: OnePlus8T-Docker-Kernel.zip
+          name: OnePlus8T-Kernel-Final
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz
+            kernel/out/arch/arm64/boot/dtbo.img
