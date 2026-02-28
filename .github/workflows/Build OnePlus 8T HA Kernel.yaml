@@ -15,7 +15,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
-      - name: Clone Toolchain
+      - name: Clone Proton Clang
         run: |
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
@@ -27,9 +27,10 @@ jobs:
       - name: Patch Kernel
         run: |
           cd kernel
+          # Blykstės klaidų taisymas
           echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
           
-          # IŠTAISOME Linker klaidas (get_project ir t.t.)
+          # Oplus simbolių sutvarkymas (Svarbu Android 16)
           cat <<EOF > drivers/soc/qcom/oplus_fix.c
           #include <linux/export.h>
           #include <linux/types.h>
@@ -78,6 +79,7 @@ jobs:
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
             echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_USB_UAS=y"
           } >> $DEFCONFIG
 
       - name: Build Kernel
@@ -90,23 +92,23 @@ jobs:
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz dtbs
 
-      - name: Collect All Files
+      - name: Collect and Build DTBO
         run: |
           mkdir -p final_output
-          # Kopijuojame branduolį
           cp kernel/out/arch/arm64/boot/Image.gz final_output/
           
-          # Sukuriame dtbo.img (SUTVARKYTA PAIEŠKA)
-          # Surandame mkdtboimg.py įrankį
-          MKDTBO_TOOL=$(find kernel -name mkdtboimg.py | head -n 1)
-          # Surandame visus .dtbo failus ir sujungiam į vieną .img
-          python3 $MKDTBO_TOOL create final_output/dtbo.img $(find kernel/out/arch/arm64/boot/dts/ -name "*.dtbo")
+          # Atsisiunčiame mkdtboimg įrankį tiesiai iš AOSP (kad nebūtų klaidų)
+          curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
+          python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg_real.py
           
-          echo "Aplanko turinis:"
+          # Sukuriame dtbo.img
+          python3 mkdtboimg_real.py create final_output/dtbo.img $(find kernel/out/arch/arm64/boot/dts/ -name "*.dtbo")
+          
+          echo "Surinkti failai:"
           ls -l final_output/
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Server-Files
+          name: OnePlus8T-Server-Kernel
           path: final_output/*
