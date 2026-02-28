@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel (Raw Files)
+name: Build OnePlus 8T HA-Server Kernel
 
 on:
   workflow_dispatch:
@@ -27,26 +27,9 @@ jobs:
       - name: Patch Kernel
         run: |
           cd kernel
-          # Ištaisome krovimo/blykstės klaidą
-          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
-          #include <linux/types.h>
-          #include <linux/export.h>
-          #include <linux/kernel.h>
-          bool is_flash_active(void) { return false; }
-          EXPORT_SYMBOL(is_flash_active);
-          int schgm_flash_torch_priority(int level) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_torch_priority);
-          int schgm_flash_init(void *data) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_init);
-          bool schgm_flash_get_vreg_ok(void) { return true; }
-          EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
-          int schgm_flash_ilim2_irq_handler(int irq, void *data) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
-          int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
-          EOF
+          echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
           
-          # Ištaisome visus trūkstamus Oplus simbolius (Stubs)
+          # IŠTAISOME Linker klaidas (get_project ir t.t.)
           cat <<EOF > drivers/soc/qcom/oplus_fix.c
           #include <linux/export.h>
           #include <linux/types.h>
@@ -83,7 +66,6 @@ jobs:
           EOF
           echo "obj-y += oplus_fix.o" >> drivers/soc/qcom/Makefile
 
-          # Konfigūracija Docker'iui ir USB Serial
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           {
@@ -94,6 +76,7 @@ jobs:
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_OPTION=y"
             echo "CONFIG_USB_STORAGE=y"
           } >> $DEFCONFIG
 
@@ -107,17 +90,23 @@ jobs:
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz dtbs
 
-      - name: Create DTBO
+      - name: Collect All Files
         run: |
-          cd kernel
-          curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
-          python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg.py
-          python3 mkdtboimg.py create out/arch/arm64/boot/dtbo.img $(find out/arch/arm64/boot/dts/ -name "*.dtbo")
+          mkdir -p final_output
+          # Kopijuojame branduolį
+          cp kernel/out/arch/arm64/boot/Image.gz final_output/
+          
+          # Sukuriame dtbo.img (SUTVARKYTA PAIEŠKA)
+          # Surandame mkdtboimg.py įrankį
+          MKDTBO_TOOL=$(find kernel -name mkdtboimg.py | head -n 1)
+          # Surandame visus .dtbo failus ir sujungiam į vieną .img
+          python3 $MKDTBO_TOOL create final_output/dtbo.img $(find kernel/out/arch/arm64/boot/dts/ -name "*.dtbo")
+          
+          echo "Aplanko turinis:"
+          ls -l final_output/
 
-      - name: Upload
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-Files-8T
-          path: |
-            kernel/out/arch/arm64/boot/Image.gz
-            kernel/out/arch/arm64/boot/dtbo.img
+          name: OnePlus8T-Server-Files
+          path: final_output/*
