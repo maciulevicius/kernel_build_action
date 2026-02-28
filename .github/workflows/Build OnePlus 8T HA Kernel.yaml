@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel
+name: Build OnePlus 8T HA-Docker Kernel (Android 16)
 
 on:
   workflow_dispatch:
@@ -20,18 +20,20 @@ jobs:
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Kernel Source
+      - name: Clone Kernel Source (Android 16 Branch)
         run: |
+          # Naudojame tavo LineageOS 23.2 šaltinį
           git clone --depth 1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel
+      - name: Patch Kernel (Stubs & Config)
         run: |
           cd kernel
-          # Blykstės klaidų taisymas
+          # Sutvarkome blykstės klaidą
           echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
           
-          # Oplus simbolių sutvarkymas (Svarbu Android 16)
-          cat <<EOF > drivers/soc/qcom/oplus_fix.c
+          # IŠTAISOME VISAS LINKER KLAIDAS (get_project ir t.t.)
+          # Sukuriame oplus_stubs.c, kad branduolys susijungtų be klaidų
+          cat <<EOF > drivers/soc/qcom/oplus_stubs.c
           #include <linux/export.h>
           #include <linux/types.h>
           int get_project(void) { return 0; }
@@ -65,7 +67,7 @@ jobs:
           int oplus_vooc_get_fastchg_ing(void) { return 0; }
           EXPORT_SYMBOL(oplus_vooc_get_fastchg_ing);
           EOF
-          echo "obj-y += oplus_fix.o" >> drivers/soc/qcom/Makefile
+          echo "obj-y += oplus_stubs.o" >> drivers/soc/qcom/Makefile
 
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
@@ -76,10 +78,7 @@ jobs:
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
-            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
-            echo "CONFIG_USB_SERIAL_OPTION=y"
             echo "CONFIG_USB_STORAGE=y"
-            echo "CONFIG_USB_UAS=y"
           } >> $DEFCONFIG
 
       - name: Build Kernel
@@ -90,25 +89,10 @@ jobs:
           make O=out ARCH=arm64 olddefconfig
           make -j2 O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz dtbs
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz
 
-      - name: Collect and Build DTBO
-        run: |
-          mkdir -p final_output
-          cp kernel/out/arch/arm64/boot/Image.gz final_output/
-          
-          # Atsisiunčiame mkdtboimg įrankį tiesiai iš AOSP (kad nebūtų klaidų)
-          curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
-          python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg_real.py
-          
-          # Sukuriame dtbo.img
-          python3 mkdtboimg_real.py create final_output/dtbo.img $(find kernel/out/arch/arm64/boot/dts/ -name "*.dtbo")
-          
-          echo "Surinkti failai:"
-          ls -l final_output/
-
-      - name: Upload Artifacts
+      - name: Upload Image.gz
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Server-Kernel
-          path: final_output/*
+          name: Image-GZ-Android16
+          path: kernel/out/arch/arm64/boot/Image.gz
