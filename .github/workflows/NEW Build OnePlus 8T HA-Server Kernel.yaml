@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel (Flashable ZIP)
+name: Build OnePlus 8T HA-Server Kernel (Flashable ZIP) NEW
 
 on:
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
       - name: Patch Kernel
         run: |
           cd kernel
-          # 1. Sutvarkome blykstės vairuotoją
+          # 1. Blykstės kodo sutvarkymas
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/types.h>
           #include <linux/export.h>
@@ -46,7 +46,7 @@ jobs:
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
 
-          # 2. Sutvarkome Oplus tapatybės funkcijas
+          # 2. Oplus simbolių sutvarkymas
           cat <<EOF > drivers/soc/qcom/oplus_fix.c
           #include <linux/export.h>
           #include <linux/types.h>
@@ -83,12 +83,11 @@ jobs:
           EOF
           echo "obj-y += oplus_fix.o" >> drivers/soc/qcom/Makefile
           
-          # 3. Konfigūracija HA serveriui
+          # 3. Konfigūracija
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           {
             echo "CONFIG_WERROR=n"
-            echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_USB_SERIAL=y"
@@ -118,12 +117,16 @@ jobs:
           git clone --depth 1 https://github.com/osm0sis/AnyKernel3
           cd AnyKernel3
           cp ../kernel/out/arch/arm64/boot/Image.gz .
-          # Surenkame DTB/DTBO
           find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} . \;
           find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtbo" -exec cp {} . \;
           
-          # IŠJUNGIAME įrenginio tikrinimą (kad nebūtų "unsupported device")
+          # ČIA SUTVARKOME TAVO KLAIDĄ:
+          # Pakeičiame tą nesąmoningą omap kelią į tikrą OnePlus 8T kelią
+          sed -i 's|block=/dev/block/platform/omap/omap_hsmmc.0/by-name/boot|block=/dev/block/by-name/boot|g' anykernel.sh
+          
+          # Išjungiam prietaiso tikrinimą ir įjungiam slotų palaikymą
           sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
+          sed -i 's/is_slot_device=0/is_slot_device=1/g' anykernel.sh
           
           zip -r ../OnePlus8T-Docker-Kernel.zip *
 
