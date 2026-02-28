@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel (Flashable ZIP)
+name: Build OnePlus 8T HA-Server Kernel (Raw Files)
 
 on:
   workflow_dispatch:
@@ -22,13 +22,12 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          # Naudojame LineageOS 23.2, nes tavo OS yra Android 16
           git clone --depth 1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
 
       - name: Patch Kernel
         run: |
           cd kernel
-          # 1. Sutvarkome blykstės klaidą (Stubs)
+          # Ištaisome krovimo/blykstės klaidą
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/types.h>
           #include <linux/export.h>
@@ -47,7 +46,7 @@ jobs:
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
           
-          # 2. Sutvarkome trūkstamus Oplus simbolius (Fix ld.lld errors)
+          # Ištaisome visus trūkstamus Oplus simbolius (Stubs)
           cat <<EOF > drivers/soc/qcom/oplus_fix.c
           #include <linux/export.h>
           #include <linux/types.h>
@@ -84,9 +83,9 @@ jobs:
           EOF
           echo "obj-y += oplus_fix.o" >> drivers/soc/qcom/Makefile
 
-          # 3. Automatiškai surandame ir konfigūruojame defconfig
-          CONFIG_FILE=$(find arch/arm64/configs/ -name "kona-perf_defconfig" | head -n 1)
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONFIG_FILE
+          # Konfigūracija Docker'iui ir USB Serial
+          DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           {
             echo "CONFIG_WERROR=n"
             echo "CONFIG_OVERLAY_FS=y"
@@ -96,7 +95,7 @@ jobs:
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_STORAGE=y"
-          } >> $CONFIG_FILE
+          } >> $DEFCONFIG
 
       - name: Build Kernel
         run: |
@@ -105,32 +104,20 @@ jobs:
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
           make -j2 O=out ARCH=arm64 \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            KCFLAGS="-w -Wno-error" \
-            KCPPFLAGS="-D__ANDROID_COMMON_KERNEL__" \
-            Image.gz dtbs
+            CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz dtbs
 
-      - name: Package with AnyKernel3
+      - name: Create DTBO
         run: |
-          git clone --depth 1 https://github.com/osm0sis/AnyKernel3 AnyKernel3
-          cd AnyKernel3
-          cp ../kernel/out/arch/arm64/boot/Image.gz .
-          # Surenkame DTB failus, kad veiktų USB portas
-          find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cp {} . \;
-          
-          # Konfigūruojame AnyKernel3 tavo telefonui (išjungiam patikras)
-          sed -i 's/do.devicecheck=1/do.devicecheck=0/g' anykernel.sh
-          sed -i 's/is_slot_device=0/is_slot_device=1/g' anykernel.sh
-          sed -i 's|block=/dev/block/td.dummy|block=/dev/block/by-name/boot|g' anykernel.sh
-          
-          zip -r ../OnePlus8T-Docker-Kernel.zip *
+          cd kernel
+          curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
+          python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg.py
+          python3 mkdtboimg.py create out/arch/arm64/boot/dtbo.img $(find out/arch/arm64/boot/dts/ -name "*.dtbo")
 
-      - name: Upload ZIP
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Kernel-ZIP-OnePlus8T
-          path: OnePlus8T-Docker-Kernel.zip
+          name: Kernel-Files-8T
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz
+            kernel/out/arch/arm64/boot/dtbo.img
