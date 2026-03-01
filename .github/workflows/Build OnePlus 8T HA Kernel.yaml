@@ -1,4 +1,4 @@
-name: Build Singularity HA-Docker Kernel
+name: Build Singularity HA-Docker Kernel (Stable)
 
 on:
   workflow_dispatch:
@@ -22,53 +22,59 @@ jobs:
 
       - name: Clone Singularity Kernel Source
         run: |
-          # Naudojame būtent Singularity branduolio šaltinį
+          # Naudojame tavo veikiantį Singularity šaltinį
           git clone --depth 1 -b 14 https://github.com/The-Anomalist/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel
+      - name: Patch Kernel Config
         run: |
           cd kernel
-          # Sutvarkome blykstės klaidą (tik dėl saugumo)
+          # 1. Sutvarkome blykstės vairuotoją (kad linkeris nepyktų)
           echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
           
-          DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
+          # 2. Surandame teisingą defconfig failą
+          # Custom branduoliuose jis dažnai vadinasi tiesiog kona-perf_defconfig (be vendor/)
+          DEFCONFIG=$(find arch/arm64/configs/ -name "kona-perf_defconfig" | head -n 1)
+          echo "Naudojamas konfigūracijos failas: $DEFCONFIG"
           
-          # 1. Išjungiam LTO (Tai garantuoja, kad branduolys pasileis be hang)
+          # Išjungiam klaidų stabdymą
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
+          
+          # IŠJUNGIAME LTO (Kad nebūtų geltono užrašo / hang krovimosi metu)
           sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           
-          # 2. Įjungiame Docker reikalavimus
+          # 3. Įrašome Docker ir Zigbee reikalavimus
           {
+            echo "CONFIG_WERROR=n"
+            echo "CONFIG_LTO_NONE=y"
+            # Docker reikalavimai
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-            echo "CONFIG_BLK_DEV_THROTTLING=y"
-            
-            # 3. Įjungiame USB Serial tavo Zigbee lazdelei
+            # USB Serial Zigbee lazdelėms (Visi pagrindiniai čipai)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
-            
-            # 4. Įjungiame USB diskų palaikymą (exFAT, NTFS)
+            # Išoriniai diskai
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_USB_UAS=y"
             echo "CONFIG_EXFAT_FS=y"
             echo "CONFIG_NTFS_FS=y"
-            
-            # 5. Išjungiam WERROR (ignoravimui klaidų)
-            echo "CONFIG_WERROR=n"
           } >> $DEFCONFIG
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          make O=out ARCH=arm64 vendor/kona-perf_defconfig
+          # Naudojame tikrąjį konfigūracijos pavadinimą (be kelio)
+          REAL_CONF=$(find arch/arm64/configs/ -name "kona-perf_defconfig" -printf "%f\n")
+          make O=out ARCH=arm64 $REAL_CONF
           make O=out ARCH=arm64 olddefconfig
-          # Buildiname Image.gz-dtb (pats stabiliausias OnePlus 8T variantas)
+          
+          # Buildiname Image.gz-dtb
           make -j2 O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
@@ -76,5 +82,5 @@ jobs:
       - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
-          name: Singularity-Docker-Kernel
+          name: Singularity-HA-Docker-Kernel
           path: kernel/out/arch/arm64/boot/Image.gz-dtb
