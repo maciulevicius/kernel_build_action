@@ -1,4 +1,4 @@
-name: Build Singularity HA-Docker Kernel
+name: Build Singularity HA-Server Kernel
 
 on:
   workflow_dispatch:
@@ -15,39 +15,68 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
-      - name: Clone Toolchain
+      - name: Download AOSP Clang
         run: |
-          git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
+          mkdir -p $GITHUB_WORKSPACE/clang
+          # Naudojame Clang 17, kuris idealiai tinka Android 15/16 ir Singularity branduoliui
+          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz" -o clang.tar.gz
+          tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity Kernel
+      - name: Clone Singularity Source
         run: |
-          # Klonuojame į 'kernel' aplanką
+          # Klonuojame būtent tavo nurodytą lineage-23.2 branch'ą
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch Config
+      - name: Patch Config (Add Docker & USB)
         run: |
           cd kernel
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # 1. IŠJUNGIAME LTO (SVARBU: tai ištaiso užstrigimą ties geltonu užrašu)
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
-          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
-          
-          # 2. ĮJUNGIAME Docker ir USB Zigbee reikalavimus
+          # ĮJUNGIAME Docker ir USB Serial Zigbee lazdelėms
+          # Mes NELIEČIAME LTO ar kitų Singularity optimizacijų - jos lieka įjungtos!
           {
-            echo "CONFIG_LTO_NONE=y"
-            echo "CONFIG_WERROR=n"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
+            echo "CONFIG_BLK_DEV_THROTTLING=y"
+            # USB Serial (Zigbee)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
+            # USB Storage
             echo "CONFIG_USB_STORAGE=y"
-            echo "CONFIG_NTFS_FS
+            echo "CONFIG_USB_UAS=y"
+            echo "CONFIG_EXFAT_FS=y"
+            echo "CONFIG_NTFS_FS=y"
+          } >> $DEFCONFIG
+
+      - name: Build Kernel
+        run: |
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          
+          # Generuojame konfigūraciją
+          make O=out ARCH=arm64 vendor/kona-perf_defconfig
+          make O=out ARCH=arm64 olddefconfig
+          
+          # PAGRINDINIS BUILDAS
+          # Naudojame oficialius nustatymus, kad visos Singularity funkcijos veiktų
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            KCFLAGS="-w" \
+            Image.gz-dtb
+
+      - name: Upload Kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: Singularity-Docker-Final
+          path: kernel/out/arch/arm64/boot/Image.gz-dtb
