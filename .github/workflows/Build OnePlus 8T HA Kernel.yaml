@@ -17,82 +17,65 @@ jobs:
 
       - name: Clone Toolchain
         run: |
+          # Naudojame Proton Clang - stabiliausias pasirinkimas
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity Kernel (Lineage-23.2)
+      - name: Clone Singularity Kernel (Lineage-23.2 branch)
         run: |
           # Klonuojame į 'kernel' aplanką
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch Kernel (Fixing Syntax & Config)
+      - name: Patch Kernel Config
         run: |
           cd kernel
-          # 1. PERRAŠOME blykstės vairuotoją su teisinga C sintakse
-          # Tai ištaisys visas ld.lld klaidas be jokių konfliktų
-          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
-          #include <linux/module.h>
-          #include <linux/types.h>
-          #include <linux/interrupt.h>
-          #include <linux/kernel.h>
-
-          bool is_flash_active(void) { return false; }
-          EXPORT_SYMBOL(is_flash_active);
-
-          int schgm_flash_torch_priority(int level) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_torch_priority);
-
-          int schgm_flash_init(void *data) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_init);
-
-          bool schgm_flash_get_vreg_ok(void *data) { return true; }
-          EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
-
-          irqreturn_t schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
-          EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
-
-          irqreturn_t schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
-          EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
-
-          MODULE_LICENSE("GPL v2");
-          EOF
+          # Tikslus kelias iki tavo defconfig
+          CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # 2. KONFIGŪRACIJA
-          DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
+          # 1. IŠJUNGIAME LTO (Garantuoja sėkmingą startą be hang)
+          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $CONF
+          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $CONF
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONF
           
-          # IŠJUNGIAME LTO (Kad nebūtų "Image destroyed" ir hang)
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
-          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
-          
-          # 3. Įrašome Docker ir USB reikalavimus
+          # 2. ĮJUNGIAME Docker ir USB Serial Zigbee lazdelėms
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
+            # Docker reikalavimai
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
+            # USB Serial (Visi pagrindiniai Zigbee čipai)
             echo "CONFIG_USB_SERIAL=y"
+            echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_OPTION=y"
+            # Storage diskams
             echo "CONFIG_USB_STORAGE=y"
-          } >> $DEFCONFIG
+            echo "CONFIG_USB_UAS=y"
+            echo "CONFIG_EXFAT_FS=y"
+            echo "CONFIG_NTFS_FS=y"
+          } >> $CONF
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          
+          # Konfigūruojame
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
-          # Buildiname Image.gz-dtb (pats saugiausias formatas tavo 8T)
+          
+          # KOMPILIAVIMAS (Naudojame Image.gz-dtb, nes jis stabiliausias)
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
 
-      - name: Upload Kernel
+      - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: Singularity-Docker-Kernel
+          name: Singularity-HA-Server-Kernel
           path: kernel/out/arch/arm64/boot/Image.gz-dtb
