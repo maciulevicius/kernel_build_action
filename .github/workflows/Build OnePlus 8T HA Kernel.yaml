@@ -15,55 +15,48 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
-      - name: Clone Kernel Source
+      - name: Clone Proton Clang
         run: |
-          # Išvalome šiukšles ir klonuojame branduolį į aplanką 'kernel'
-          git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
-
-      - name: Clone Toolchain
-        run: |
-          # Klonuojame kompiliatorių į atskirą vietą
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Patch Kernel (Brute Force Fix)
+      - name: Clone Singularity Kernel (Lineage-23.2)
+        run: |
+          # Klonuojame į aplanką 'kernel'
+          git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
+
+      - name: Patch Kernel (Only Missing Parts)
         run: |
           cd kernel
-          # 1. IŠTAISOME blykstės klaidą (is_flash_active ir kt.)
-          # Perrašome failą su "dummy" funkcijomis, kad linkeris neberėktų
+          # 1. Sutvarkome TIK blykstės klaidą (is_flash_active ir kt.)
+          # Naudojame 'weak' atributą, kad nebūtų jokių "duplicate symbol" klaidų
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/module.h>
           #include <linux/types.h>
           #include <linux/interrupt.h>
-          
-          bool is_flash_active(void) { return false; }
+          bool __attribute__((weak)) is_flash_active(void) { return false; }
           EXPORT_SYMBOL(is_flash_active);
-          
-          int schgm_flash_torch_priority(int level) { return 0; }
+          int __attribute__((weak)) schgm_flash_torch_priority(int level) { return 0; }
           EXPORT_SYMBOL(schgm_flash_torch_priority);
-          
-          int schgm_flash_init(void *chg) { return 0; }
+          int __attribute__((weak)) schgm_flash_init(void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_init);
-          
-          bool schgm_flash_get_vreg_ok(void *chg) { return true; }
+          bool __attribute__((weak)) schgm_flash_get_vreg_ok(void *data) { return true; }
           EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
-          
-          irqreturn_t schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          irqreturn_t __attribute__((weak)) schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
           EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
-          
-          irqreturn_t schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          irqreturn_t __attribute__((weak)) schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
 
-          # 2. KONFIGŪRACIJA
+          # 2. Konfigūracija
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # Išjungiam LTO (privaloma, kad nestrigtų krovimas ties geltonu užrašu)
+          # IŠJUNGIAME LTO (SVARBU: tai išsprendžia užstrigimą ties geltonu užrašu)
           sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           
-          # Įjungiam Docker ir USB Zigbee reikalavimus
+          # Įjungiame Docker ir USB Zigbee reikalavimus
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
@@ -76,27 +69,22 @@ jobs:
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
-            echo "CONFIG_USB_SERIAL_OPTION=y"
             echo "CONFIG_USB_STORAGE=y"
-            echo "CONFIG_OPLUS_CHG=y"
           } >> $DEFCONFIG
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          
-          # Konfigūruojame branduolį
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
-          
-          # Buildiname Image.gz-dtb
+          # Buildiname Image.gz-dtb (branduolys + įrenginio medis)
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
 
-      - name: Upload Kernel
+      - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
-          name: Singularity-Docker-Kernel
+          name: Singularity-HA-Docker-Kernel
           path: kernel/out/arch/arm64/boot/Image.gz-dtb
