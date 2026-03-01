@@ -20,74 +20,56 @@ jobs:
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity Kernel (Lineage-23.2)
+      - name: Clone Singularity Kernel Source
         run: |
+          # Naudojame tavo nurodytą oficialų Singularity šaltinį
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch Kernel (THE ULTIMATE FIX)
+      - name: Configure Kernel
         run: |
           cd kernel
-          # 1. Sukuriame FIX failą, kuris užtaisys visas skyles (is_flash_active ir kt.)
-          # Naudojame __attribute__((weak)), kad nebūtų "duplicate symbol" klaidų!
-          cat <<EOF > drivers/power/supply/qcom/oplus_ha_fix.c
-          #include <linux/module.h>
-          #include <linux/types.h>
-          #include <linux/interrupt.h>
-          #include <linux/kernel.h>
-
-          bool __attribute__((weak)) is_flash_active(void) { return false; }
-          EXPORT_SYMBOL(is_flash_active);
-
-          int __attribute__((weak)) schgm_flash_torch_priority(int level) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_torch_priority);
-
-          int __attribute__((weak)) schgm_flash_init(void *data) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_init);
-
-          bool __attribute__((weak)) schgm_flash_get_vreg_ok(void *data) { return true; }
-          EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
-
-          irqreturn_t __attribute__((weak)) schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
-          EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
-
-          irqreturn_t __attribute__((weak)) schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
-          EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
-
-          MODULE_LICENSE("GPL v2");
-          EOF
+          CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # Įtraukiame šį failą į krovimo vairuotojų sąrašą
-          echo "obj-y += oplus_ha_fix.o" >> drivers/power/supply/qcom/Makefile
-
-          # 2. KONFIGŪRACIJA
-          DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
+          # 1. IŠJUNGIAME LTO (Būtina stabilumui savadarbiame builde)
+          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $CONF
+          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $CONF
           
-          # Pridedame visus Docker ir USB Zigbee reikalavimus
+          # 2. IŠJUNGIAME WERROR (Kad warnings nestabdytų darbo)
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONF
+          
+          # 3. ĮJUNGIAME tavo HA serverio funkcijas
           {
+            echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
+            # Docker bazė
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
+            # USB Serial Zigbee lazdelėms (Visi čipai)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
+            # USB diskai
             echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_USB_UAS=y"
             echo "CONFIG_EXFAT_FS=y"
             echo "CONFIG_NTFS_FS=y"
-          } >> $DEFCONFIG
+          } >> $CONF
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          
+          # Sugeneruojame .config
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
-          # Buildiname Image.gz-dtb
+          
+          # KOMPILIAVIMAS (Buildiname Image.gz-dtb)
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
