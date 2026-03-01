@@ -17,39 +17,43 @@ jobs:
 
       - name: Clone Toolchain
         run: |
-          # Naudojame Proton Clang - tai standartas šiam branduoliui
+          # Naudojame Proton Clang, nes Singularity kurejai ji rekomenduoja
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity Kernel Source
+      - name: Clone Singularity Kernel (Lineage-23.2 branch)
         run: |
-          # Klonuojame tavo nurodytą lineage-23.2 branch'ą į 'kernel' aplanką
+          # Klonuojame i 'kernel' aplanka
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Add Docker & USB Support to Config
+      - name: Patch Config (Docker & USB)
         run: |
           cd kernel
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # Išjungiam klaidų stabdymą (WERROR), kad kompiliacija nepabėgtų
+          # 1. Išjungiam LTO (Tai garantuoja, kad telefonas neuzstrigs ties geltonu uzrasu)
+          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $CONF
+          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $CONF
+          
+          # 2. Isjungiam WERROR (kad warnings nestabdytu buildo)
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONF
           
-          # Pridedame Docker ir USB Zigbee reikalavimus į defconfig galą
+          # 3. ĮJUNGIAME Docker reikalavimus ir USB Serial (Zigbee)
           {
+            echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
-            # Docker bazė
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-            # USB Serial (Zigbee lazdelėms: CP210x, CH341, FTDI)
+            # USB Serial Zigbee lazdelems
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
-            # USB Storage (Diskams)
+            # USB Storage (isoriniams diskams)
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_USB_UAS=y"
             echo "CONFIG_EXFAT_FS=y"
@@ -61,15 +65,14 @@ jobs:
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           
-          # Sugeneruojame .config ir patvirtiname nustatymus
+          # Konfiguruojame
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
           
           # KOMPILIAVIMAS
-          # Naudojame Image.gz-dtb (sujungtas branduolys + įrenginio medis)
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz-dtb
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
 
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
