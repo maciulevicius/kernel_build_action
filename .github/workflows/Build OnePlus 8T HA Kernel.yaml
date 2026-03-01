@@ -20,15 +20,15 @@ jobs:
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity Kernel
+      - name: Clone Singularity Kernel (Lineage-23.2)
         run: |
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch Kernel (Fix Linker & Config)
+      - name: Patch Kernel (Surgical Fix)
         run: |
           cd kernel
-          # 1. PERRAŠOME blykstės vairuotoją su "DUMMY" funkcijomis. 
-          # Tai ištaisys "undefined symbol" klaidą, kuri tau stabdė build'ą.
+          # 1. PERRAŠOME blykstės vairuotoją su teisinga C sintakse.
+          # Tai ištaisys "undefined symbol: is_flash_active" be jokių konfliktų.
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/module.h>
           #include <linux/types.h>
@@ -52,17 +52,18 @@ jobs:
 
           irqreturn_t schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
+
+          MODULE_LICENSE("GPL v2");
           EOF
 
-          # 2. KONFIGŪRACIJA
+          # 2. KONFIGŪRACIJA (Docker + Zigbee)
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # IŠJUNGIAME LTO (Garantuoja sėkmingą startą be "geltono užrašo" / hang)
+          # IŠJUNGIAME LTO (SVARBU: tai ištaiso užstrigimą ties geltonu užrašu)
           sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           
-          # 3. ĮJUNGIAME Docker ir USB Serial (Zigbee lazdelėms)
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
@@ -70,12 +71,16 @@ jobs:
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
+            # USB Serial Zigbee lazdelėms
             echo "CONFIG_USB_SERIAL=y"
+            echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
+            # Storage diskams
             echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_EXFAT_FS=y"
             echo "CONFIG_NTFS_FS=y"
           } >> $DEFCONFIG
 
@@ -85,13 +90,12 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
-          
-          # Buildiname Image.gz-dtb (sujungtas branduolys + įrenginio medis)
+          # Buildiname Image.gz-dtb
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
 
-      - name: Upload Kernel
+      - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
         with:
           name: Singularity-HA-Docker-Kernel
