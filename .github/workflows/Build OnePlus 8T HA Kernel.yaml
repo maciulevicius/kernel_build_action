@@ -1,4 +1,4 @@
-name: Build OnePlus 8T HA-Server Kernel (Android 16)
+name: Build OnePlus 8T HA-Server Kernel (Android 16 - FINAL)
 
 on:
   workflow_dispatch:
@@ -15,58 +15,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
-      - name: Clone Toolchain
+      - name: Clone Proton Clang
         run: |
-          # Naudojame Proton Clang - jis geriausiai tinka SM8250
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
       - name: Clone Kernel Source
         run: |
-          # Tavo LineageOS 23.2 šaltinis
+          # Naudojame tavo LineageOS 23.2 (Android 16) šaltinį
           git clone --depth 1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel (The Ultimate Fix)
+      - name: Patch Kernel
         run: |
           cd kernel
-          # 1. Sutvarkome blykstės klaidą
-          echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
-          
-          # 2. SUKURIAME PILNĄ FIX FAILĄ (Visiems linkeriams užkimšti)
-          # Šitos funkcijos rėkia ld.lld klaidose - mes jas tiesiog apibrėžiame kaip tuščias.
-          cat <<EOF > drivers/soc/qcom/oplus_fix_final.c
-          #include <linux/export.h>
+          # 1. Sutvarkome TIK lūžtantį blykstės vairuotoją (be jokių papildomų fix failų)
+          # Tai ištaisys "undefined symbol: is_flash_active"
+          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/types.h>
-          int get_project(void) { return 0; }
-          EXPORT_SYMBOL(get_project);
-          int is_project(int project) { return 0; }
-          EXPORT_SYMBOL(is_project);
-          int get_boot_mode(void) { return 0; }
-          EXPORT_SYMBOL(get_boot_mode);
-          int get_PCB_Version(void) { return 0; }
-          EXPORT_SYMBOL(get_PCB_Version);
-          int qpnp_is_power_off_charging(void) { return 0; }
-          EXPORT_SYMBOL(qpnp_is_power_off_charging);
-          void msm_drm_notifier_call_chain(unsigned long val, void *v) { }
-          EXPORT_SYMBOL(msm_drm_notifier_call_chain);
-          void switch_headset_state(int state) { }
-          EXPORT_SYMBOL(switch_headset_state);
-          void opticalfp_irq_handler_register(void *data) { }
-          EXPORT_SYMBOL(opticalfp_irq_handler_register);
-          int oplus_gauge_init(void *data) { return 0; }
-          EXPORT_SYMBOL(oplus_gauge_init);
-          void switch_to_otg_mode(int enable) { }
-          EXPORT_SYMBOL(switch_to_otg_mode);
-          void opchg_set_pd_sdp(int enable) { }
-          EXPORT_SYMBOL(opchg_set_pd_sdp);
-          void oplus_vooc_adapter_update_is_rx_gpio(void *data) { }
-          EXPORT_SYMBOL(oplus_vooc_adapter_update_is_rx_gpio);
-          void oplus_vooc_adapter_update_is_tx_gpio(void *data) { }
-          EXPORT_SYMBOL(oplus_vooc_adapter_update_is_tx_gpio);
-          int oplus_vooc_get_fastchg_started(void) { return 0; }
-          EXPORT_SYMBOL(oplus_vooc_get_fastchg_started);
-          int oplus_vooc_get_fastchg_ing(void) { return 0; }
-          EXPORT_SYMBOL(oplus_vooc_get_fastchg_ing);
+          #include <linux/export.h>
+          #include <linux/kernel.h>
           bool is_flash_active(void) { return false; }
           EXPORT_SYMBOL(is_flash_active);
           int schgm_flash_torch_priority(int level) { return 0; }
@@ -80,20 +47,26 @@ jobs:
           int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
-          echo "obj-y += oplus_fix_final.o" >> drivers/soc/qcom/Makefile
-
-          # 3. Konfigūracija HA serveriui
+          
+          # 2. KONFIGŪRACIJA (Rašome tiesiai į defconfig)
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
+          
+          # ĮSITIKINAME, kad OPLUS įjungtas (Fast Charge) ir WERROR išjungtas
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
+          sed -i 's/CONFIG_OPLUS_CHG=n/CONFIG_OPLUS_CHG=y/g' $DEFCONFIG
+          
           {
             echo "CONFIG_WERROR=n"
+            echo "CONFIG_SECTION_MISMATCH_WARN_ONLY=y"
+            # Docker reikalavimai
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
+            echo "CONFIG_MEMCG_SWAP=y"
+            # USB Serial Zigbee lazdelėms
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
-            echo "CONFIG_USB_SERIAL_OPTION=y"
             echo "CONFIG_USB_STORAGE=y"
           } >> $DEFCONFIG
 
@@ -103,22 +76,13 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
+          # Buildiname Image.gz-dtb (su integruotu DTB, kad neperkaistų/pasileistų)
           make -j2 O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz dtbs
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
 
-      - name: Collect Files
-        run: |
-          mkdir -p output
-          cp kernel/out/arch/arm64/boot/Image.gz output/
-          # Atsisiunčiame įrankį DTBO kūrimui
-          curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
-          python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg_real.py
-          # Sukuriame DTBO
-          python3 mkdtboimg_real.py create output/dtbo.img $(find kernel/out/arch/arm64/boot/dts/ -name "*.dtbo")
-
-      - name: Upload
+      - name: Upload Image
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Server-Final
-          path: output/*
+          name: OnePlus8T-Docker-Kernel
+          path: kernel/out/arch/arm64/boot/Image.gz-dtb
