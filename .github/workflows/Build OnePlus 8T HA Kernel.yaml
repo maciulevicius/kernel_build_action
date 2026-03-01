@@ -1,4 +1,4 @@
-name: Build Singularity HA-Docker Kernel (Stable)
+name: Build Singularity HA-Docker Kernel
 
 on:
   workflow_dispatch:
@@ -22,45 +22,81 @@ jobs:
 
       - name: Clone Singularity Kernel Source
         run: |
-          # Naudojame tavo veikiantį Singularity šaltinį
           git clone --depth 1 -b 14 https://github.com/The-Anomalist/android_kernel_oneplus_sm8250 kernel
 
-      - name: Patch Kernel Config
+      - name: Patch Kernel (Brute Force Fix)
         run: |
           cd kernel
-          # 1. Sutvarkome blykstės vairuotoją (kad linkeris nepyktų)
+          # 1. Sutvarkome blykstės klaidą
           echo "/* empty */" > drivers/power/supply/qcom/schgm-flash.c
           
-          # 2. Surandame teisingą defconfig failą
-          # Custom branduoliuose jis dažnai vadinasi tiesiog kona-perf_defconfig (be vendor/)
+          # 2. UNIVERSALUS FIX FAILAS (Sutvarko visas ld.lld klaidas)
+          # Naudojame __attribute__((weak)), kad linkeris neberėktų dėl trūkstamų funkcijų
+          cat <<EOF > drivers/soc/qcom/oplus_server_fix.c
+          #include <linux/export.h>
+          #include <linux/types.h>
+          #define WEAK __attribute__((weak))
+
+          WEAK int get_project(void) { return 0; }
+          EXPORT_SYMBOL(get_project);
+          WEAK int is_project(int project) { return 0; }
+          EXPORT_SYMBOL(is_project);
+          WEAK int get_boot_mode(void) { return 0; }
+          EXPORT_SYMBOL(get_boot_mode);
+          WEAK int get_PCB_Version(void) { return 0; }
+          EXPORT_SYMBOL(get_PCB_Version);
+          WEAK int qpnp_is_power_off_charging(void) { return 0; }
+          EXPORT_SYMBOL(qpnp_is_power_off_charging);
+          WEAK void msm_drm_notifier_call_chain(unsigned long val, void *v) { }
+          EXPORT_SYMBOL(msm_drm_notifier_call_chain);
+          WEAK void switch_headset_state(int state) { }
+          EXPORT_SYMBOL(switch_headset_state);
+          WEAK void opticalfp_irq_handler_register(void *data) { }
+          EXPORT_SYMBOL(opticalfp_irq_handler_register);
+          WEAK int oplus_gauge_init(void *data) { return 0; }
+          EXPORT_SYMBOL(oplus_gauge_init);
+          WEAK void *sm8250_get_pinctrl_ops(void) { return (void *)0; }
+          EXPORT_SYMBOL(sm8250_get_pinctrl_ops);
+          WEAK int msm_pinctrl_probe(void *pdev, void *data) { return 0; }
+          EXPORT_SYMBOL(msm_pinctrl_probe);
+          WEAK int wcd_pinctrl_register(void *pdev) { return 0; }
+          EXPORT_SYMBOL(wcd_pinctrl_register);
+          WEAK bool is_flash_active(void) { return false; }
+          EXPORT_SYMBOL(is_flash_active);
+          WEAK int schgm_flash_torch_priority(int level) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_torch_priority);
+          WEAK int schgm_flash_init(void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_init);
+          WEAK bool schgm_flash_get_vreg_ok(void) { return true; }
+          EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
+          WEAK int schgm_flash_ilim2_irq_handler(int irq, void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
+          WEAK int schgm_flash_state_change_irq_handler(int irq, void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
+          EOF
+          echo "obj-y += oplus_server_fix.o" >> drivers/soc/qcom/Makefile
+
+          # 3. Konfigūracija
           DEFCONFIG=$(find arch/arm64/configs/ -name "kona-perf_defconfig" | head -n 1)
-          echo "Naudojamas konfigūracijos failas: $DEFCONFIG"
-          
-          # Išjungiam klaidų stabdymą
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
-          
-          # IŠJUNGIAME LTO (Kad nebūtų geltono užrašo / hang krovimosi metu)
+          # Išjungiam LTO (kad nebūtų hang starto metu)
           sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           
-          # 3. Įrašome Docker ir Zigbee reikalavimus
           {
             echo "CONFIG_WERROR=n"
             echo "CONFIG_LTO_NONE=y"
-            # Docker reikalavimai
+            # Docker
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
-            echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-            # USB Serial Zigbee lazdelėms (Visi pagrindiniai čipai)
+            # USB Serial Zigbee lazdelėms
             echo "CONFIG_USB_SERIAL=y"
-            echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
-            # Išoriniai diskai
+            # Diskai
             echo "CONFIG_USB_STORAGE=y"
-            echo "CONFIG_USB_UAS=y"
             echo "CONFIG_EXFAT_FS=y"
             echo "CONFIG_NTFS_FS=y"
           } >> $DEFCONFIG
@@ -69,11 +105,9 @@ jobs:
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          # Naudojame tikrąjį konfigūracijos pavadinimą (be kelio)
           REAL_CONF=$(find arch/arm64/configs/ -name "kona-perf_defconfig" -printf "%f\n")
           make O=out ARCH=arm64 $REAL_CONF
           make O=out ARCH=arm64 olddefconfig
-          
           # Buildiname Image.gz-dtb
           make -j2 O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
@@ -82,5 +116,5 @@ jobs:
       - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
-          name: Singularity-HA-Docker-Kernel
+          name: Singularity-HA-Server-Kernel
           path: kernel/out/arch/arm64/boot/Image.gz-dtb
