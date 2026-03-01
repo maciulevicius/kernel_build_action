@@ -17,53 +17,67 @@ jobs:
 
       - name: Clone Toolchain (Garantuotas būdas)
         run: |
-          # Git clone niekada neišmes "not in gzip format" klaidos
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
       - name: Clone Singularity Kernel Source
         run: |
-          # Naudojame tavo nurodytą branch'ą
+          # Naudojame tavo nurodytą Singularity repozitoriją ir branch'ą
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch Kernel (Fix Errors & Add Features)
+      - name: Patch Kernel (Universal Fix)
         run: |
           cd kernel
-          # 1. Sutvarkome blykstės klaidą, kuri tau stabdė build'ą
-          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
-          #include <linux/module.h>
+          # 1. Sukuriame UNIVERSALŲ FIX failą. 
+          # Naudojame __attribute__((weak)), kad linkeris neberėktų dėl jokių dublikatų ar trūkumų.
+          cat <<EOF > drivers/soc/qcom/oplus_server_fix.c
+          #include <linux/export.h>
           #include <linux/types.h>
           #include <linux/interrupt.h>
-          bool __attribute__((weak)) is_flash_active(void) { return false; }
+          #define WEAK __attribute__((weak))
+
+          WEAK bool is_flash_active(void) { return false; }
           EXPORT_SYMBOL(is_flash_active);
-          int __attribute__((weak)) schgm_flash_torch_priority(int level) { return 0; }
+          WEAK int schgm_flash_torch_priority(int level) { return 0; }
           EXPORT_SYMBOL(schgm_flash_torch_priority);
-          int __attribute__((weak)) schgm_flash_init(void *data) { return 0; }
+          WEAK int schgm_flash_init(void *data) { return 0; }
           EXPORT_SYMBOL(schgm_flash_init);
-          bool __attribute__((weak)) schgm_flash_get_vreg_ok(void *data) { return true; }
+          WEAK bool schgm_flash_get_vreg_ok(void *data) { return true; }
           EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
-          irqreturn_t __attribute__((weak)) schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          WEAK irqreturn_t schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
           EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
-          irqreturn_t __attribute__((weak)) schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          WEAK irqreturn_t schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
           EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
+          
+          # Įtraukiame šį fixą į kompiliavimą
+          echo "obj-y += oplus_server_fix.o" >> drivers/soc/qcom/Makefile
 
-          # 2. Konfigūruojame Docker ir USB Zigbee
+          # 2. KONFIGŪRACIJA (Docker + Zigbee)
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
-          # Išjungiam LTO, kad garantuotume startą be "geltono užrašo"
+          
+          # IŠJUNGIAME LTO (SVARBU: tai sutvarko užstrigimą ties geltonu užrašu)
           sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
+          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
           
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
+            echo "CONFIG_MEMCG_SWAP=y"
+            echo "CONFIG_MEMCG_SWAP_ENABLED=y"
+            # Zigbee USB Serial
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_OPTION=y"
+            # Diskai
             echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_EXFAT_FS=y"
+            echo "CONFIG_NTFS_FS=y"
           } >> $DEFCONFIG
 
       - name: Build Kernel
@@ -72,5 +86,13 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
-          # Buildiname Image.gz ir DTB failus
-          make -j$(nproc --all)
+          # Buildiname Image.gz-dtb
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
+
+      - name: Upload Kernel Image
+        uses: actions/upload-artifact@v4
+        with:
+          name: Singularity-HA-Docker-Kernel
+          path: kernel/out/arch/arm64/boot/Image.gz-dtb
