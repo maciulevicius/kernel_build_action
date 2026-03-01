@@ -15,49 +15,39 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
-      - name: Clone Toolchain
+      - name: Download AOSP Clang 14
         run: |
-          git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
+          mkdir -p $GITHUB_WORKSPACE/clang
+          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784d.tar.gz" -o clang.tar.gz
+          tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity Kernel Source
+      - name: Clone Singularity Kernel
         run: |
-          # Naudojame tavo nurodytą oficialų Singularity šaltinį
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Configure Kernel
+      - name: Patch Config
         run: |
           cd kernel
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # 1. IŠJUNGIAME LTO (Būtina stabilumui savadarbiame builde)
+          # IŠJUNGIAME tai, kas trukdo startui ir kompiliacijai
           sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $CONF
           sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $CONF
-          
-          # 2. IŠJUNGIAME WERROR (Kad warnings nestabdytų darbo)
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONF
           
-          # 3. ĮJUNGIAME tavo HA serverio funkcijas
+          # ĮJUNGIAME Docker ir USB Serial Zigbee lazdelėms
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
-            # Docker bazė
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-            # USB Serial Zigbee lazdelėms (Visi čipai)
             echo "CONFIG_USB_SERIAL=y"
-            echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
-            echo "CONFIG_USB_SERIAL_OPTION=y"
-            # USB diskai
             echo "CONFIG_USB_STORAGE=y"
-            echo "CONFIG_USB_UAS=y"
-            echo "CONFIG_EXFAT_FS=y"
-            echo "CONFIG_NTFS_FS=y"
           } >> $CONF
 
       - name: Build Kernel
@@ -65,17 +55,22 @@ jobs:
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           
-          # Sugeneruojame .config
+          # Konfigūracija
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
           
-          # KOMPILIAVIMAS (Buildiname Image.gz-dtb)
+          # KOMPILIAVIMAS su -fcommon vėliava (ištaiso visas linker klaidas!)
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
+            CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            KCFLAGS="-w -fcommon" \
+            Image.gz-dtb
 
-      - name: Upload Kernel Image
+      - name: Upload Kernel
         uses: actions/upload-artifact@v4
         with:
-          name: Singularity-HA-Docker-Kernel
+          name: Singularity-Docker-Kernel
           path: kernel/out/arch/arm64/boot/Image.gz-dtb
