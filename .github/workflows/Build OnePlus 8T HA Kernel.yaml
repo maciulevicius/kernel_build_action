@@ -17,83 +17,59 @@ jobs:
 
       - name: Clone Toolchain
         run: |
+          # Naudojame Proton Clang - tai standartas šiam branduoliui
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity Kernel (Lineage-23.2)
+      - name: Clone Singularity Kernel Source
         run: |
+          # Klonuojame tavo nurodytą lineage-23.2 branch'ą į 'kernel' aplanką
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch Kernel (Surgical Fix)
+      - name: Add Docker & USB Support to Config
         run: |
           cd kernel
-          # 1. PERRAŠOME blykstės vairuotoją su teisinga C sintakse.
-          # Tai ištaisys "undefined symbol: is_flash_active" be jokių konfliktų.
-          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
-          #include <linux/module.h>
-          #include <linux/types.h>
-          #include <linux/interrupt.h>
-          #include <linux/kernel.h>
-
-          bool is_flash_active(void) { return false; }
-          EXPORT_SYMBOL(is_flash_active);
-
-          int schgm_flash_torch_priority(int level) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_torch_priority);
-
-          int schgm_flash_init(void *data) { return 0; }
-          EXPORT_SYMBOL(schgm_flash_init);
-
-          bool schgm_flash_get_vreg_ok(void *data) { return true; }
-          EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
-
-          irqreturn_t schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
-          EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
-
-          irqreturn_t schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
-          EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
-
-          MODULE_LICENSE("GPL v2");
-          EOF
-
-          # 2. KONFIGŪRACIJA (Docker + Zigbee)
-          DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
+          CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # IŠJUNGIAME LTO (SVARBU: tai ištaiso užstrigimą ties geltonu užrašu)
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
-          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
+          # Išjungiam klaidų stabdymą (WERROR), kad kompiliacija nepabėgtų
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONF
           
+          # Pridedame Docker ir USB Zigbee reikalavimus į defconfig galą
           {
-            echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
+            # Docker bazė
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-            # USB Serial Zigbee lazdelėms
+            # USB Serial (Zigbee lazdelėms: CP210x, CH341, FTDI)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_OPTION=y"
-            # Storage diskams
+            # USB Storage (Diskams)
             echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_USB_UAS=y"
             echo "CONFIG_EXFAT_FS=y"
             echo "CONFIG_NTFS_FS=y"
-          } >> $DEFCONFIG
+          } >> $CONF
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          
+          # Sugeneruojame .config ir patvirtiname nustatymus
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
-          # Buildiname Image.gz-dtb
+          
+          # KOMPILIAVIMAS
+          # Naudojame Image.gz-dtb (sujungtas branduolys + įrenginio medis)
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 KCFLAGS="-w -Wno-error" Image.gz-dtb
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz-dtb
 
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
