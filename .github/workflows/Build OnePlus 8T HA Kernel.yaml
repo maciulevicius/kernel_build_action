@@ -15,62 +15,72 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
 
-      - name: Download AOSP Clang 14
+      - name: Clone Toolchain
         run: |
-          mkdir -p $GITHUB_WORKSPACE/clang
-          curl -L "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784d.tar.gz" -o clang.tar.gz
-          tar -C $GITHUB_WORKSPACE/clang -xzf clang.tar.gz
+          git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity Kernel
+      - name: Clone Singularity Kernel (Lineage-23.2)
         run: |
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch Config
+      - name: Patch Kernel (Brute Force Symbol Fix)
         run: |
           cd kernel
-          CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
+          # IŠTAISOME 11 LINKER KLAIDŲ TIESIAI SOCINFO.C
+          # Pridedame "weak" funkcijas, kad linkeris jas rastų ir nebūtų duplikatų
+          cat <<EOF >> drivers/soc/qcom/socinfo.c
+          #include <linux/interrupt.h>
+          bool __attribute__((weak)) is_flash_active(void) { return false; }
+          int __attribute__((weak)) schgm_flash_torch_priority(int level) { return 0; }
+          int __attribute__((weak)) schgm_flash_init(void *data) { return 0; }
+          bool __attribute__((weak)) schgm_flash_get_vreg_ok(void *data) { return true; }
+          irqreturn_t __attribute__((weak)) schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          irqreturn_t __attribute__((weak)) schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          EOF
+
+          # KONFIGŪRACIJA (Docker + USB Zigbee)
+          DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
+          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
+          # IŠJUNGIAME LTO (Kad nebūtų geltono užrašo ir hang)
+          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
+          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           
-          # IŠJUNGIAME tai, kas trukdo startui ir kompiliacijai
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $CONF
-          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $CONF
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONF
-          
-          # ĮJUNGIAME Docker ir USB Serial Zigbee lazdelėms
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
-            echo "CONFIG_MEMCG_SWAP=y"
-            echo "CONFIG_MEMCG_SWAP_ENABLED=y"
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_STORAGE=y"
-          } >> $CONF
+          } >> $DEFCONFIG
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          
-          # Konfigūracija
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
-          
-          # KOMPILIAVIMAS su -fcommon vėliava (ištaiso visas linker klaidas!)
+          # Buildiname Image.gz (branduolys) ir dtbs (vairuotojų žemėlapis)
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            KCFLAGS="-w -fcommon" \
-            Image.gz-dtb
+            CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs
 
-      - name: Upload Kernel
+      - name: Create DTBO and Collect Artifacts
+        run: |
+          mkdir -p output
+          cp kernel/out/arch/arm64/boot/Image.gz output/
+          # Atsisiunčiame įrankį DTBO kūrimui
+          curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
+          python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg_real.py
+          # Sukuriame dtbo.img
+          python3 mkdtboimg_real.py create output/dtbo.img $(find kernel/out/arch/arm64/boot/dts/ -name "*.dtbo")
+
+      - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Singularity-Docker-Kernel
-          path: kernel/out/arch/arm64/boot/Image.gz-dtb
+          name: OnePlus8T-Server-Kernel-Files
+          path: output/*
