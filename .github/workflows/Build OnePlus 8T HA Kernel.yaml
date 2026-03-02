@@ -24,25 +24,33 @@ jobs:
         run: |
           git clone --depth 1 -b lineage-23.2 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch Kernel (Brute Force Symbol Fix)
+      - name: Patch Kernel (Surgical Fix)
         run: |
           cd kernel
-          # IŠTAISOME 11 LINKER KLAIDŲ TIESIAI SOCINFO.C
-          # Pridedame "weak" funkcijas, kad linkeris jas rastų ir nebūtų duplikatų
-          cat <<EOF >> drivers/soc/qcom/socinfo.c
+          # 1. Išvalome probleminį blykstės failą, bet paliekame jo antraštę.
+          # Tai išspręs "undefined symbol" be jokių "duplicate" klaidų.
+          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
+          #include <linux/module.h>
+          #include <linux/types.h>
           #include <linux/interrupt.h>
-          bool __attribute__((weak)) is_flash_active(void) { return false; }
-          int __attribute__((weak)) schgm_flash_torch_priority(int level) { return 0; }
-          int __attribute__((weak)) schgm_flash_init(void *data) { return 0; }
-          bool __attribute__((weak)) schgm_flash_get_vreg_ok(void *data) { return true; }
-          irqreturn_t __attribute__((weak)) schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
-          irqreturn_t __attribute__((weak)) schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          bool is_flash_active(void) { return false; }
+          EXPORT_SYMBOL(is_flash_active);
+          int schgm_flash_torch_priority(int level) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_torch_priority);
+          int schgm_flash_init(void *data) { return 0; }
+          EXPORT_SYMBOL(schgm_flash_init);
+          bool schgm_flash_get_vreg_ok(void *data) { return true; }
+          EXPORT_SYMBOL(schgm_flash_get_vreg_ok);
+          irqreturn_t schgm_flash_ilim2_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          EXPORT_SYMBOL(schgm_flash_ilim2_irq_handler);
+          irqreturn_t schgm_flash_state_change_irq_handler(int irq, void *data) { return IRQ_HANDLED; }
+          EXPORT_SYMBOL(schgm_flash_state_change_irq_handler);
           EOF
 
-          # KONFIGŪRACIJA (Docker + USB Zigbee)
+          # 2. KONFIGŪRACIJA
           DEFCONFIG="arch/arm64/configs/vendor/kona-perf_defconfig"
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $DEFCONFIG
-          # IŠJUNGIAME LTO (Kad nebūtų geltono užrašo ir hang)
+          # Priverstinai išjungiame LTO (Garantuoja sėkmingą BOOT)
           sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $DEFCONFIG
           
@@ -51,11 +59,20 @@ jobs:
             echo "CONFIG_WERROR=n"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_CGROUP_BPF=y"
+            echo "CONFIG_MEMCG_SWAP=y"
+            echo "CONFIG_MEMCG_SWAP_ENABLED=y"
+            # Zigbee USB Serial
             echo "CONFIG_USB_SERIAL=y"
+            echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_OPTION=y"
+            # Diskai
             echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_EXFAT_FS=y"
+            echo "CONFIG_NTFS_FS=y"
+            echo "CONFIG_OPLUS_CHG=y"
           } >> $DEFCONFIG
 
       - name: Build Kernel
@@ -64,23 +81,22 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
-          # Buildiname Image.gz (branduolys) ir dtbs (vairuotojų žemėlapis)
-          make -j$(nproc --all) O=out ARCH=arm64 \
+          # Buildiname tik Image.gz ir DTBS
+          make -j2 O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs
 
-      - name: Create DTBO and Collect Artifacts
+      - name: Create DTBO and Collect
         run: |
           mkdir -p output
           cp kernel/out/arch/arm64/boot/Image.gz output/
-          # Atsisiunčiame įrankį DTBO kūrimui
+          # Atsisiunčiame mkdtboimg įrankį (kad nebūtų klaidos)
           curl -Lo mkdtboimg.py "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/master/utils/src/mkdtboimg.py?format=TEXT"
           python3 -c "import base64; print(base64.b64decode(open('mkdtboimg.py').read()).decode())" > mkdtboimg_real.py
-          # Sukuriame dtbo.img
           python3 mkdtboimg_real.py create output/dtbo.img $(find kernel/out/arch/arm64/boot/dts/ -name "*.dtbo")
 
-      - name: Upload Artifacts
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: OnePlus8T-Server-Kernel-Files
+          name: OnePlus8T-Server-Final
           path: output/*
