@@ -22,7 +22,7 @@ jobs:
 
       - name: Clone LineageOS Kernel
         run: |
-          git clone --depth 1 -b lineage-23.2 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
+          git clone --depth 1 -b interconnect https://github.com/The-Anomalist/Singularity kernel
 
       - name: Patch Kernel Source and Config
         run: |
@@ -107,38 +107,32 @@ jobs:
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          # 1. Konfigūracija
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          make O=out ARCH=arm64 olddefconfig
+          
+          # 2. Kompiliavimas (Tavo nurodyta LLVM struktūra)
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs
+            CC=clang \
+            LLVM=1 LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-w" \
+            Image.gz dtbs
 
       - name: Create DTB and DTBO Image
         run: |
           cd kernel
-          # 1. Sujungiame DTB failus (veikia gerai)
-          find out -name "*.dtb" -exec cat {} + > out/dtb-final
+          # Sujungiame visus DTB failus
+          find out -name "*.dtb" -exec cat {} + > out/dtb
           
-          # 2. Surandame mkdtboimg.py skriptą automatiškai
-          DTBO_SCRIPT=$(find . -name "mkdtboimg.py" | head -n 1)
-          echo "Rastas skriptas: $DTBO_SCRIPT"
-          
-          # 3. Surandame visus .dtbo failus
-          DTBO_FILES=$(find out -name "*.dtbo")
-          
-          # 4. Sukuriame dtbo.img
-          if [ -n "$DTBO_SCRIPT" ] && [ -n "$DTBO_FILES" ]; then
-            python3 $DTBO_SCRIPT create out/dtbo.img $DTBO_FILES
-            echo "dtbo.img sėkmingai sukurtas!"
-          else
-            echo "ĮSPĖJIMAS: Nepavyko sukurti dtbo.img (nerastas skriptas arba failai)"
-          fi
+          # Sukuriame DTBO.img (skriptas visada būna šioje vietoje Qualcomm branduoliuose)
+          python3 scripts/dtc/libfdt/mkdtboimg.py create out/dtbo.img $(find out -name "*.dtbo")
           
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Kernel-Kebab
+          name: HA-Kernel-Kebab-A16
           path: |
             kernel/out/arch/arm64/boot/Image.gz
-            kernel/out/dtb-final
+            kernel/out/dtb
             kernel/out/dtbo.img
