@@ -29,7 +29,7 @@ jobs:
           cd kernel
           sed -i '/kernelsu/d' drivers/Kconfig
           
-          # Ištaisome schgm-flash.c
+          # Ištaisome draiverius (Stub'ai)
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/module.h>
           #include <linux/types.h>
@@ -42,7 +42,6 @@ jobs:
           bool is_flash_active(struct smb_charger *chg) { return false; }
           EOF
 
-          # Ištaisome oplus_stubs.c
           cat <<EOF > drivers/oplus_stubs.c
           #include <linux/kernel.h>
           #include <linux/export.h>
@@ -103,33 +102,25 @@ jobs:
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          yes "" | make O=out ARCH=arm64 olddefconfig
+          make O=out ARCH=arm64 olddefconfig
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs dtbo.img
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs
 
-      - name: Create Image.gz-dtb
+      - name: Create DTB and DTBO Image
         run: |
           cd kernel
-          # Lankstesnė paieška - surandame pagrindinį konos DTB failą
-          KERNEL_GZ="out/arch/arm64/boot/Image.gz"
-          # Sujungiame visus qcom dtb failus (saugu, magiskboot juos supras)
-          find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cat {} + > out/arch/arm64/boot/dtb-merged
+          # Sujungiame visus DTB į vieną, kurį naudosime 'magiskboot repack' metu
+          find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cat {} + > out/dtb-final
           
-          if [ -f "$KERNEL_GZ" ]; then
-            cat $KERNEL_GZ out/arch/arm64/boot/dtb-merged > Image.gz-dtb
-            echo "Image.gz-dtb sėkmingai sukurtas!"
-          else
-            echo "KLAIDA: Image.gz nerastas!"
-            exit 1
-          fi
-
+          # Sukuriame dtbo.img naudojant branduolio įrankius
+          python3 scripts/dtc/libfdt/mkdtboimg.py create out/dtbo.img $(find out/arch/arm64/boot/dts/qcom/ -name "*.dtbo")
+          
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: HA-Kernel-Kebab
           path: |
-            kernel/Image.gz-dtb
-            kernel/out/arch/arm64/boot/dtbo.img
             kernel/out/arch/arm64/boot/Image.gz
-            kernel/out/arch/arm64/boot/dts/qcom/*.dtb
+            kernel/out/dtb-final
+            kernel/out/dtbo.img
