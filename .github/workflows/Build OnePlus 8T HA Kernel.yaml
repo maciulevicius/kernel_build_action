@@ -110,11 +110,23 @@ jobs:
       - name: Create DTB and DTBO Image
         run: |
           cd kernel
-          # Naudojame find, kad surastume failus bet kur 'out' aplanke
+          # 1. Sujungiame DTB failus (veikia gerai)
           find out -name "*.dtb" -exec cat {} + > out/dtb-final
           
-          # Sukuriame dtbo.img (skriptas mkdtboimg.py yra tavo kernelio šaltinyje)
-          python3 scripts/dtc/libfdt/mkdtboimg.py create out/dtbo.img $(find out -name "*.dtbo")
+          # 2. Surandame mkdtboimg.py skriptą automatiškai
+          DTBO_SCRIPT=$(find . -name "mkdtboimg.py" | head -n 1)
+          echo "Rastas skriptas: $DTBO_SCRIPT"
+          
+          # 3. Surandame visus .dtbo failus
+          DTBO_FILES=$(find out -name "*.dtbo")
+          
+          # 4. Sukuriame dtbo.img
+          if [ -n "$DTBO_SCRIPT" ] && [ -n "$DTBO_FILES" ]; then
+            python3 $DTBO_SCRIPT create out/dtbo.img $DTBO_FILES
+            echo "dtbo.img sėkmingai sukurtas!"
+          else
+            echo "ĮSPĖJIMAS: Nepavyko sukurti dtbo.img (nerastas skriptas arba failai)"
+          fi
           
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
