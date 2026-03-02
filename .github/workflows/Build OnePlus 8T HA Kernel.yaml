@@ -110,11 +110,11 @@ jobs:
       - name: Create DTB and DTBO Image
         run: |
           cd kernel
-          # Sujungiame visus DTB į vieną, kurį naudosime 'magiskboot repack' metu
-          find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cat {} + > out/dtb-final
+          # Naudojame find, kad surastume failus bet kur 'out' aplanke
+          find out -name "*.dtb" -exec cat {} + > out/dtb-final
           
-          # Sukuriame dtbo.img naudojant branduolio įrankius
-          python3 scripts/dtc/libfdt/mkdtboimg.py create out/dtbo.img $(find out/arch/arm64/boot/dts/qcom/ -name "*.dtbo")
+          # Sukuriame dtbo.img (skriptas mkdtboimg.py yra tavo kernelio šaltinyje)
+          python3 scripts/dtc/libfdt/mkdtboimg.py create out/dtbo.img $(find out -name "*.dtbo")
           
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
