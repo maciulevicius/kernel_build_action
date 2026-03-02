@@ -30,35 +30,31 @@ jobs:
           # 1. Pašaliname trūkstamą KernelSU
           sed -i '/kernelsu/d' drivers/Kconfig
           
-          # 2. IŠTAISOME krovimo draiverio klaidą (schgm-flash.c)
-          # Užuot taisę kodą, mes jį agresyviai pakeičiame tuščiomis funkcijomis,
-          # kad kompiliatorius nebeišmestų "incomplete definition" klaidų.
-          # Home Assistant serveriui blykstės krovimo valdymas nereikalingas.
+          # 2. EKSTREMALUS IŠTAISYMAS: Perrašome schgm-flash.c be jokių gamintojo headerių
+          # Tai sustabdys "incomplete type" klaidas, nes kompiliatorius nebebandys skaityti smb5-lib.h
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
-          #include <linux/module.h>
-          #include <linux/device.h>
-          #include "smb5-lib.h"
-          #include "schgm-flash.h"
+          #include <linux/types.h>
+          struct smb_charger;
           int schgm_flash_get_vreg_ok(struct smb_charger *chg, int *val) { return 0; }
-          void schgm_flash_torch_priority(struct smb_charger *chg, enum torch_mode mode) {}
+          void schgm_flash_torch_priority(struct smb_charger *chg, int mode) {}
           int schgm_flash_init(struct smb_charger *chg) { return 0; }
-          bool is_flash_active(struct smb_charger *chg) { return false; }
+          int is_flash_active(struct smb_charger *chg) { return 0; }
           EOF
 
           # 3. Nustatome defconfig kelią
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
 
-          # 4. IŠVALOME senuosius LTO ir WERROR nustatymus (kad neklaustų interaktyviai)
+          # 4. IŠVALOME senuosius LTO nustatymus, kad build'as nebeklaustų pasirinkimų
           sed -i '/CONFIG_LTO/d' $CONF
           sed -i '/CONFIG_LTO_CLANG/d' $CONF
           sed -i '/CONFIG_THINLTO/d' $CONF
           sed -i '/CONFIG_WERROR/d' $CONF
 
-          # 5. ĮJUNGIAME viską Docker, Zigbee ir USB diskams
+          # 5. ĮJUNGIAME Docker, Zigbee ir USB Diskų palaikymą
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
-            # Docker branduolys (Būtina Home Assistant)
+            # Docker branduolio funkcijos
             echo "CONFIG_NAMESPACES=y"
             echo "CONFIG_NET_NS=y"
             echo "CONFIG_PID_NS=y"
@@ -79,9 +75,8 @@ jobs:
             echo "CONFIG_IP_NF_TARGET_MASQUERADE=y"
             echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
             echo "CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y"
-            echo "CONFIG_NETFILTER_XT_MATCH_IPVS=y"
             echo "CONFIG_IP_NF_NAT=y"
-            # USB Serial (Zigbee: Sonoff, Conbee ir t.t.)
+            # USB Serial (Zigbee stick'ams)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
@@ -91,6 +86,8 @@ jobs:
             # USB Diskai
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_BLK_DEV_SD=y"
+            echo "CONFIG_EXT4_FS=y"
+            echo "CONFIG_FUSE_FS=y"
           } >> $CONF
 
       - name: Build Kernel
