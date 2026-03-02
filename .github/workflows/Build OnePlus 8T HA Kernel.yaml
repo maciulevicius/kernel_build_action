@@ -47,7 +47,7 @@ jobs:
           #include <linux/export.h>
           int oplus_vooc_adapter_update_is_rx_gpio(void) { return 0; }
           int oplus_vooc_adapter_update_is_tx_gpio(void) { return 0; }
-          int get_project(void) { return 0; }
+          int get_project(void) { return 20801; } // OnePlus 8T ID
           int qpnp_is_power_off_charging(void) { return 0; }
           int get_boot_mode(void) { return 0; }
           void switch_to_otg_mode(int mode) { }
@@ -59,16 +59,18 @@ jobs:
           void switch_headset_state(int state) { }
           int msm_drm_notifier_call_chain(unsigned long val, void *v) { return 0; }
           void opticalfp_irq_handler_register(void *handler) { }
-          int is_project(int project) { return 0; }
+          int is_project(int project) { if (project == 20801) return 1; return 0; }
           EXPORT_SYMBOL(msm_drm_notifier_call_chain);
           EOF
           echo "obj-y += oplus_stubs.o" >> drivers/Makefile
 
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
+          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $CONF
+          sed -i 's/CONFIG_THINLTO=y/CONFIG_LTO_NONE=y/g' $CONF
           sed -i '/CONFIG_LTO/d' $CONF
-          sed -i '/CONFIG_LTO_CLANG/d' $CONF
-          sed -i '/CONFIG_THINLTO/d' $CONF
           sed -i '/CONFIG_WERROR/d' $CONF
+          echo "CONFIG_LTO_NONE=y" >> $CONF
+          echo "CONFIG_WERROR=n" >> $CONF
 
           {
             echo "CONFIG_LTO_NONE=y"
