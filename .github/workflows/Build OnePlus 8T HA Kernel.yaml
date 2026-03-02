@@ -146,5 +146,6 @@ jobs:
           name: HA-Kernel-Kebab
           path: |
             kernel/out/arch/arm64/boot/Image.gz
-            kernel/out/arch/arm64/boot/dtb
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/arch/arm64/boot/dts/qcom/*.dtb
             kernel/out/arch/arm64/boot/dtbo.img
