@@ -28,43 +28,48 @@ jobs:
         run: |
           cd kernel
           sed -i '/kernelsu/d' drivers/Kconfig
-          sed -i '1i#include "smb5-lib.h"' drivers/power/supply/qcom/schgm-flash.c
+          sed -i 's/obj-y += schgm-flash.o//g' drivers/power/supply/qcom/Makefile
+          sed -i 's/obj-$(CONFIG_QPNP_SMB5) += schgm-flash.o//g' drivers/power/supply/qcom/Makefile
           
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
           
-          # IŠJUNGIAME LTO ir WERROR (Stabilumui)
+          # 4. VALOME LTO ir WERROR (kad build'as nebesustotų klausti klausimų)
           sed -i '/CONFIG_LTO/d' $CONF
           sed -i '/CONFIG_LTO_CLANG/d' $CONF
           sed -i '/CONFIG_THINLTO/d' $CONF
+          sed -i '/CONFIG_WERROR/d' $CONF
           
-          # ĮJUNGIAME Docker ir USB Serial (Zigbee)
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
-            # Docker palaikymas
+            # Pilnas Docker palaikymas
             echo "CONFIG_NAMESPACES=y"
-            echo "CONFIG_OVERLAY_FS=y"
+            echo "CONFIG_NET_NS=y"
+            echo "CONFIG_PID_NS=y"
+            echo "CONFIG_IPC_NS=y"
+            echo "CONFIG_UTS_NS=y"
             echo "CONFIG_CGROUPS=y"
             echo "CONFIG_CGROUP_BPF=y"
             echo "CONFIG_MEMCG=y"
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
-            echo "CONFIG_BLK_DEV_THROTTLING=y"
+            echo "CONFIG_OVERLAY_FS=y"
+            echo "CONFIG_VETH=y"
+            echo "CONFIG_BRIDGE=y"
             echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
-            # USB Zigbee Stick'ai (CP210x, CH341, FTDI, ACM)
+            echo "CONFIG_BLK_DEV_THROTTLING=y"
+            # USB Serial (Zigbee stick'ams: CP210x, CH341, FTDI, Sonoff)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_ACM=y"
-            # USB Diskai ir Failų sistemos
+            # USB Diskai ir failų sistemos
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_BLK_DEV_SD=y"
             echo "CONFIG_EXT4_FS=y"
             echo "CONFIG_FUSE_FS=y"
-            echo "CONFIG_MSDOS_FS=y"
-            echo "CONFIG_VFAT_FS=y"
             echo "CONFIG_EXFAT_FS=y"
             echo "CONFIG_NTFS_FS=y"
           } >> $CONF
@@ -75,12 +80,12 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           mkdir -p out
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          make O=out ARCH=arm64 olddefconfig
-          # Buildiname Image.gz ir dtbs
+          # NAUDOJAME 'yes ""', kad automatiškai parinktų nutylėtas vertes ir nesustotų
+          yes "" | make O=out ARCH=arm64 olddefconfig
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs
-
+      
       - name: Create Image.gz-dtb (Auto-Locate)
         run: |
           cd kernel
