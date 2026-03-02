@@ -34,7 +34,7 @@ jobs:
           sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $CONF
           sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONF
           
-          # 2. ĮJUNGIAME Docker reikalavimus
+          # 2. ĮJUNGIAME Docker ir USB Serial Zigbee lazdelėms
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
@@ -43,7 +43,7 @@ jobs:
             echo "CONFIG_MEMCG_SWAP=y"
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
             echo "CONFIG_BLK_DEV_THROTTLING=y"
-            # USB Serial (Zigbee lazdelėms)
+            # USB Serial (Zigbee)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
@@ -61,22 +61,30 @@ jobs:
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           
-          # Sugeneruojame .config
+          # Konfigūracija
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           make O=out ARCH=arm64 olddefconfig
           
-          # KOMPILIAVIMAS (Buildiname Image.gz ir dtbs atskirai)
+          # KOMPILIAVIMAS (Buildiname Image.gz ir dtbs)
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs
 
-      - name: Create Image.gz-dtb Manually
+      - name: Create Image.gz-dtb (Auto-Path Fix)
         run: |
           cd kernel
-          # Sujungiame branduolį ir įrenginio medį į vieną failą
-          # find suras tavo OnePlus 8T dtb failą (kona.dtb)
-          cat out/arch/arm64/boot/Image.gz $(find out/arch/arm64/boot/dts/ -name "kona.dtb" | head -n 1) > out/arch/arm64/boot/Image.gz-dtb
-          echo "Image.gz-dtb sukurtas!"
+          # Surandame kona.dtb bet kuriame 'out' aplanko kampelyje
+          DTB_PATH=$(find out -name "kona.dtb" | head -n 1)
+          echo "Rastas DTB failas: $DTB_PATH"
+          
+          if [ -z "$DTB_PATH" ]; then
+            echo "KLAIDA: kona.dtb nerastas!"
+            exit 1
+          fi
+          
+          # Sujungiame branduolį su DTB
+          cat out/arch/arm64/boot/Image.gz $DTB_PATH > out/arch/arm64/boot/Image.gz-dtb
+          echo "Image.gz-dtb sukurtas sėkmingai!"
 
       - name: Upload Kernel Image
         uses: actions/upload-artifact@v4
