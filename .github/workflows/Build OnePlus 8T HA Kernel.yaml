@@ -27,12 +27,9 @@ jobs:
       - name: Patch Kernel Source and Config
         run: |
           cd kernel
-          # 1. Pašaliname trūkstamą KernelSU nuorodą
           sed -i '/kernelsu/d' drivers/Kconfig
           
-          # 2. IŠTAISOME "incomplete definition" klaidą (schgm-flash.c)
-          # Perrašome failą taip, kad jis turėtų minimalias struktūras be išorinių headerių.
-          # Tai užtikrins, kad kompiliatorius neberėktų, o greitasis krovimas veiks.
+          # Ištaisome schgm-flash.c
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/module.h>
           #include <linux/types.h>
@@ -45,7 +42,7 @@ jobs:
           bool is_flash_active(struct smb_charger *chg) { return false; }
           EOF
 
-          # 3. OPLUS STUBS (Ištaiso "undefined symbol" klaidas vėlesniame etape)
+          # Ištaisome oplus_stubs.c
           cat <<EOF > drivers/oplus_stubs.c
           #include <linux/kernel.h>
           #include <linux/export.h>
@@ -68,20 +65,15 @@ jobs:
           EOF
           echo "obj-y += oplus_stubs.o" >> drivers/Makefile
 
-          # 4. Konfigūracijos paruošimas
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
-          
-          # Išvalome senus LTO nustatymus, kad neklaustų interaktyviai
           sed -i '/CONFIG_LTO/d' $CONF
           sed -i '/CONFIG_LTO_CLANG/d' $CONF
           sed -i '/CONFIG_THINLTO/d' $CONF
           sed -i '/CONFIG_WERROR/d' $CONF
 
-          # 5. Įjungiame HA serveriui gyvybiškai svarbius nustatymus
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
-            # Docker branduolio nustatymai
             echo "CONFIG_NAMESPACES=y"
             echo "CONFIG_NET_NS=y"
             echo "CONFIG_PID_NS=y"
@@ -95,13 +87,11 @@ jobs:
             echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
             echo "CONFIG_IP_NF_NAT=y"
             echo "CONFIG_IP_NF_TARGET_MASQUERADE=y"
-            # Zigbee stick'ų draiveriai (USB-to-Serial)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_ACM=y"
-            # Išoriniai USB diskai
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_BLK_DEV_SD=y"
             echo "CONFIG_EXT4_FS=y"
@@ -112,39 +102,34 @@ jobs:
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          mkdir -p out
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          # NAUDOJAME 'yes ""', kad automatiškai parinktų nutylėtas vertes ir nesustotų
           yes "" | make O=out ARCH=arm64 olddefconfig
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs
-      
-      - name: Create Image.gz-dtb (Auto-Locate)
+            LLVM=1 LLVM_IAS=1 KCFLAGS="-w" Image.gz dtbs dtbo.img
+
+      - name: Create Image.gz-dtb
         run: |
           cd kernel
-          # SURANDAME branduolį ir DTB failą, kad ir kur jie būtų 'out' aplanke
-          KERNEL_GZ=$(find out -name "Image.gz" | head -n 1)
-          KONA_DTB=$(find out -name "kona.dtb" | head -n 1)
+          # Lankstesnė paieška - surandame pagrindinį konos DTB failą
+          KERNEL_GZ="out/arch/arm64/boot/Image.gz"
+          # Sujungiame visus qcom dtb failus (saugu, magiskboot juos supras)
+          find out/arch/arm64/boot/dts/qcom/ -name "*.dtb" -exec cat {} + > out/arch/arm64/boot/dtb-merged
           
-          echo "Rastas branduolys: $KERNEL_GZ"
-          echo "Rastas DTB: $KONA_DTB"
-          
-          if [ -z "$KERNEL_GZ" ] || [ -z "$KONA_DTB" ]; then
-            echo "KLAIDA: Nepavyko rasti Image.gz arba kona.dtb!"
-            ls -R out
+          if [ -f "$KERNEL_GZ" ]; then
+            cat $KERNEL_GZ out/arch/arm64/boot/dtb-merged > Image.gz-dtb
+            echo "Image.gz-dtb sėkmingai sukurtas!"
+          else
+            echo "KLAIDA: Image.gz nerastas!"
             exit 1
           fi
-          
-          # Sujungiame juos į vieną Image.gz-dtb failą
-          cat $KERNEL_GZ $KONA_DTB > Image.gz-dtb
-          echo "Image.gz-dtb sėkmingai sukurtas!"
 
       - name: Upload Kernel Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: HA-Kernel-Kebab
           path: |
-            kernel/out/arch/arm64/boot/Image.gz
+            kernel/Image.gz-dtb
             kernel/out/arch/arm64/boot/dtbo.img
-            kernel/out/boot.img
+            kernel/out/arch/arm64/boot/Image.gz
+            kernel/out/arch/arm64/boot/dts/qcom/*.dtb
