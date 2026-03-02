@@ -97,6 +97,10 @@ jobs:
             echo "CONFIG_BLK_DEV_SD=y"
             echo "CONFIG_EXT4_FS=y"
             echo "CONFIG_FUSE_FS=y"
+            echo "CONFIG_PSTORE=y"
+            echo "CONFIG_PSTORE_CONSOLE=y"
+            echo "CONFIG_PSTORE_RAM=y"
+            echo "CONFIG_PSTORE_PMSG=y"
           } >> $CONF
 
       - name: Build Kernel
