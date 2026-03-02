@@ -28,13 +28,14 @@ jobs:
         run: |
           cd kernel
           sed -i '/kernelsu/d' drivers/Kconfig
+          sed -i '1i#include "smb5-lib.h"' drivers/power/supply/qcom/schgm-flash.c
           
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
           
           # IŠJUNGIAME LTO ir WERROR (Stabilumui)
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $CONF
-          sed -i 's/CONFIG_LTO=y/CONFIG_LTO_NONE=y/g' $CONF
-          sed -i 's/CONFIG_WERROR=y/CONFIG_WERROR=n/g' $CONF
+          sed -i '/CONFIG_LTO/d' $CONF
+          sed -i '/CONFIG_LTO_CLANG/d' $CONF
+          sed -i '/CONFIG_THINLTO/d' $CONF
           
           # ĮJUNGIAME Docker ir USB Serial (Zigbee)
           {
@@ -50,7 +51,7 @@ jobs:
             echo "CONFIG_MEMCG_SWAP_ENABLED=y"
             echo "CONFIG_BLK_DEV_THROTTLING=y"
             echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
-            # USB Zigbee Stick'ai (CP210x, CH341, FTDI)
+            # USB Zigbee Stick'ai (CP210x, CH341, FTDI, ACM)
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
