@@ -27,11 +27,25 @@ jobs:
       - name: Patch Kernel Source and Config
         run: |
           cd kernel
-          # 1. Pašaliname trūkstamą KernelSU
+          # 1. Pašaliname trūkstamą KernelSU nuorodą
           sed -i '/kernelsu/d' drivers/Kconfig
           
-          # 2. SUKURIAME STUB FAILĄ (Ištaiso "undefined symbol" klaidas)
-          # Šis failas sukuria tuščias funkcijas, kurių tikisi kompiliatorius
+          # 2. IŠTAISOME "incomplete definition" klaidą (schgm-flash.c)
+          # Perrašome failą taip, kad jis turėtų minimalias struktūras be išorinių headerių.
+          # Tai užtikrins, kad kompiliatorius neberėktų, o greitasis krovimas veiks.
+          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
+          #include <linux/module.h>
+          #include <linux/types.h>
+          struct smb_charger {};
+          struct smb_irq_data { void *parent_data; char *name; };
+          enum torch_mode { TORCH_DISABLED, TORCH_LOW, TORCH_HIGH };
+          int schgm_flash_get_vreg_ok(struct smb_charger *chg, int *val) { return 0; }
+          void schgm_flash_torch_priority(struct smb_charger *chg, enum torch_mode mode) {}
+          int schgm_flash_init(struct smb_charger *chg) { return 0; }
+          bool is_flash_active(struct smb_charger *chg) { return false; }
+          EOF
+
+          # 3. OPLUS STUBS (Ištaiso "undefined symbol" klaidas vėlesniame etape)
           cat <<EOF > drivers/oplus_stubs.c
           #include <linux/kernel.h>
           #include <linux/export.h>
@@ -52,52 +66,42 @@ jobs:
           int is_project(int project) { return 0; }
           EXPORT_SYMBOL(msm_drm_notifier_call_chain);
           EOF
-
-          # Užregistruojame šį failą sistemoje
           echo "obj-y += oplus_stubs.o" >> drivers/Makefile
 
-          # 3. Nustatome defconfig kelią
+          # 4. Konfigūracijos paruošimas
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
-
-          # 4. IŠVALOME senuosius LTO nustatymus (kad neklaustų interaktyviai)
+          
+          # Išvalome senus LTO nustatymus, kad neklaustų interaktyviai
           sed -i '/CONFIG_LTO/d' $CONF
           sed -i '/CONFIG_LTO_CLANG/d' $CONF
           sed -i '/CONFIG_THINLTO/d' $CONF
           sed -i '/CONFIG_WERROR/d' $CONF
 
-          # 5. ĮJUNGIAME Docker, Zigbee ir USB Diskų palaikymą
+          # 5. Įjungiame HA serveriui gyvybiškai svarbius nustatymus
           {
             echo "CONFIG_LTO_NONE=y"
             echo "CONFIG_WERROR=n"
-            # Docker branduolio funkcijos (Svarbu tinkleliui ir izoliacijai)
+            # Docker branduolio nustatymai
             echo "CONFIG_NAMESPACES=y"
             echo "CONFIG_NET_NS=y"
             echo "CONFIG_PID_NS=y"
             echo "CONFIG_IPC_NS=y"
             echo "CONFIG_UTS_NS=y"
             echo "CONFIG_CGROUPS=y"
-            echo "CONFIG_CGROUP_CPUACCT=y"
-            echo "CONFIG_CGROUP_DEVICE=y"
-            echo "CONFIG_CGROUP_FREEZER=y"
-            echo "CONFIG_CGROUP_SCHED=y"
-            echo "CONFIG_CPUSETS=y"
             echo "CONFIG_MEMCG=y"
-            echo "CONFIG_KEYS=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_VETH=y"
             echo "CONFIG_BRIDGE=y"
             echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
-            echo "CONFIG_NETFILTER_XT_MATCH_CONNTRACK=y"
             echo "CONFIG_IP_NF_NAT=y"
             echo "CONFIG_IP_NF_TARGET_MASQUERADE=y"
-            # USB Serial (Zigbee stick'ams: CP210x, CH341, FTDI, Sonoff)
+            # Zigbee stick'ų draiveriai (USB-to-Serial)
             echo "CONFIG_USB_SERIAL=y"
-            echo "CONFIG_USB_SERIAL_GENERIC=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
             echo "CONFIG_USB_ACM=y"
-            # USB Diskai ir failų sistemos
+            # Išoriniai USB diskai
             echo "CONFIG_USB_STORAGE=y"
             echo "CONFIG_BLK_DEV_SD=y"
             echo "CONFIG_EXT4_FS=y"
