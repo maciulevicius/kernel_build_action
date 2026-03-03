@@ -29,6 +29,7 @@ jobs:
           cd kernel
           sed -i '/kernelsu/d' drivers/Kconfig
           
+          # Ištaisome schgm-flash.c
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/module.h>
           #include <linux/types.h>
@@ -41,6 +42,7 @@ jobs:
           bool is_flash_active(struct smb_charger *chg) { return false; }
           EOF
 
+          # Ištaisome oplus_stubs.c
           cat <<EOF > drivers/oplus_stubs.c
           #include <linux/kernel.h>
           #include <linux/export.h>
@@ -69,7 +71,7 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # Išjungiam interaktyvumą
+          # IŠJUNGIAM INTERAKTYVUMĄ
           sed -i '/CONFIG_LTO/d' out/.config
           sed -i '/CONFIG_LTO_CLANG/d' out/.config
           sed -i '/CONFIG_WERROR/d' out/.config
@@ -104,10 +106,9 @@ jobs:
           } >> out/.config
           
           make O=out ARCH=arm64 olddefconfig
+          # Buildiname 'Image' (ne Image.gz)
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang LLVM=1 LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             KCFLAGS="-w" Image dtbs
 
       - name: Prepare Raw Artifacts
@@ -115,12 +116,11 @@ jobs:
           mkdir -p raw_files
           cp kernel/out/arch/arm64/boot/Image raw_files/
           find kernel/out -name "*.dtb" -exec cat {} + > raw_files/dtb_merged
-          # Surenkame .dtbo failus
           find kernel/out -name "*.dtbo" -exec cp {} raw_files/ \;
-          # Pasiimame patį įrankį iš kernelio source!
+          # Pasiimame mkdtboimg.py tiesiai iš kodo
           find kernel -name "mkdtboimg.py" -exec cp {} raw_files/ \;
 
-      - name: Upload Raw Kernel Files
+      - name: Upload Raw Build
         uses: actions/upload-artifact@v4
         with:
           name: raw-kernel-build
@@ -137,37 +137,33 @@ jobs:
 
       - name: Package Images
         run: |
-          # 1. Paruošiame LineageOS įrankius
+          # 1. Parsisiunčiame VISUS LineageOS įrankius (tai išspręs GKI klaidą)
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
-          export PYTHONPATH=$PYTHONPATH:$(pwd)/tools
-
+          
           # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
           # 3. Išpakuojame šabloną
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 4. SUKURIAME NAUJĄ BOOT.IMG (Dabar tikrai bus ~60MB)
-          # Naudojame 'Image' (ne Image.gz), nes tavo build'as sugeneravo būtent jį
-          python3 tools/mkbootimg.py \
-            --kernel Image \
-            --ramdisk unpacked/ramdisk \
-            --dtb dtb_merged \
+          # 4. SUKURIAME NAUJĄ BOOT.IMG (Dabar tikrai bus pilnas ~60MB)
+          # Paleidžiame iš tools aplanko, kad Python matytų gki/ modulį
+          cd tools
+          python3 mkbootimg.py \
+            --kernel ../Image \
+            --ramdisk ../unpacked/ramdisk \
+            --dtb ../dtb_merged \
             --header_version 2 \
             --pagesize 4096 \
             --cmdline "androidboot.hardware=qcom androidboot.memcg=1 androidboot.usbcontroller=a600000.dwc3 cgroup.memory=nokmem,nosocket loop.max_part=7 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 reboot=panic_warm service_locator.enable=1 swiotlb=2048 kpti=off" \
             --os_version 16.0.0 \
             --os_patch_level 2026-02 \
-            -o HA_boot.img
+            -o ../HA_boot.img
+          cd ..
 
-          # 5. Sukuriame HA_dtbo.img
-          # Naudojame įrankį mkdtboimg.py, kurį pirmo žingsnio metu nukopijavome į raw_files
-          DTBO_FILES=$(ls *.dtbo 2>/dev/null || echo "")
-          if [ -f "mkdtboimg.py" ] && [ -n "$DTBO_FILES" ]; then
-            python3 mkdtboimg.py create HA_dtbo.img $DTBO_FILES
-            echo "dtbo.img sėkmingai sukurtas!"
-          else
-            echo "ĮSPĖJIMAS: mkdtboimg.py arba .dtbo failai nerasti. Praleidžiame."
+          # 5. Sukuriame HA_dtbo.img (naudojame atsineštą įrankį)
+          if [ -f "mkdtboimg.py" ]; then
+            python3 mkdtboimg.py create HA_dtbo.img $(ls *.dtbo)
           fi
 
       - name: Upload Final Images
