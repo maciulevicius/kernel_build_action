@@ -1,4 +1,4 @@
-name: Build Lineage-23-kebab-Docker-Final
+name: Build LineageOS 23 kebab Docker Kernel
 on:
   workflow_dispatch:
 
@@ -6,40 +6,78 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup
-        run: sudo apt-get update && sudo apt-get install -y bc bison build-essential flex git libelf-dev libssl-dev make python3 curl zip lz4
-      - name: Toolchain
-        run: git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
-      - name: Source
-        run: git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
-      - name: Build
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip lz4
+
+      - name: Clone Toolchain
+        run: |
+          git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
+          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
+
+      - name: Clone LineageOS Kernel
+        run: |
+          # Naudojame oficialią LineageOS 22.1 šaką, kuri skirta Android 15
+          git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
+
+      - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          make O=out ARCH=arm64 vendor/kebab_perf_defconfig
           
-          # ĮJUNGIAME DOCKER PER SCRIPTS/CONFIG
-          ./scripts/config --file out/.config -e NAMESPACES -e NET_NS -e PID_NS -e IPC_NS -e UTS_NS -e USER_NS -e CGROUPS -e MEMCG -e OVERLAY_FS -e VETH -e BRIDGE -e IKCONFIG -e IKCONFIG_PROC
+          # 1. Sukuriame bazinį config (Naudojame KONA-PERF, nes kebab_perf nėra)
+          make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # IŠJUNGIAME LTO - TAI YRA SVARBIAUSIA, KAD VEIKTŲ!
+          # 2. ĮJUNGIAME DOCKER (Naudojame oficialų įrankį)
+          ./scripts/config --file out/.config -e NAMESPACES
+          ./scripts/config --file out/.config -e NET_NS
+          ./scripts/config --file out/.config -e PID_NS
+          ./scripts/config --file out/.config -e IPC_NS
+          ./scripts/config --file out/.config -e UTS_NS
+          ./scripts/config --file out/.config -e USER_NS
+          ./scripts/config --file out/.config -e CGROUPS
+          ./scripts/config --file out/.config -e MEMCG
+          ./scripts/config --file out/.config -e OVERLAY_FS
+          ./scripts/config --file out/.config -e VETH
+          ./scripts/config --file out/.config -e BRIDGE
+          ./scripts/config --file out/.config -e IKCONFIG
+          ./scripts/config --file out/.config -e IKCONFIG_PROC
+          
+          # 3. IŠJUNGIAME LTO (SVARBU: tai garantuoja, kad branduolys pasileis)
           ./scripts/config --file out/.config -d LTO_CLANG
           ./scripts/config --file out/.config -e LTO_NONE
           
+          # 4. Pritaiko nustatymus
           make O=out ARCH=arm64 olddefconfig
-          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz dtbs
+          
+          # 5. Kompiliuojame (Image.gz yra standartas LineageOS)
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-w" Image.gz dtbs
 
       - name: Create Flashable Zip (AnyKernel3)
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git
           cd AnyKernel3
+          # Nukopijuojame Image.gz
           cp ../kernel/out/arch/arm64/boot/Image.gz .
-          # Čia surinksime visus DTB, kad tavo telefonas pasileistų
+          # Surinkome visus DTB failus iš qcom aplanko (būtina kebab modeliui)
           find ../kernel/out/arch/arm64/boot/dts/vendor/qcom/ -name "*.dtb" -exec cat {} + > dtb
+          # Konfigūruojame AnyKernel3
           sed -i 's/device.name1=maguro/device.name1=kebab/g' anykernel.sh
-          zip -r ../Kebab-Docker-Kernel.zip *
-      - name: Upload
+          sed -i 's/device.name2=tuna/device.name2=OnePlus8T/g' anykernel.sh
+          zip -r ../Kebab-Lineage23-Docker.zip *
+
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Kebab-Kernel-Docker
-          path: Kebab-Docker-Kernel.zip
+          name: Lineage23-Kebab-Docker
+          path: Kebab-Lineage23-Docker.zip
