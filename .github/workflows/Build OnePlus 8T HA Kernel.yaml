@@ -125,8 +125,7 @@ jobs:
         with:
           name: raw-kernel-build
           path: raw_files/
-
- package-images:
+  package-images:
     needs: build-kernel
     runs-on: ubuntu-22.04
     steps:
