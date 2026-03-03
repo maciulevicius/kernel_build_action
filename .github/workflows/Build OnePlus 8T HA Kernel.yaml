@@ -138,7 +138,7 @@ jobs:
 
       - name: Package Images
         run: |
-          # 1. Parsisiunčiame LineageOS boot.img įrankius (mkbootimg, unpack_bootimg)
+          # 1. Parsisiunčiame boot.img įrankius (mkbootimg, unpack_bootimg)
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
           export PYTHONPATH=$PYTHONPATH:$(pwd)/tools
 
@@ -149,10 +149,10 @@ jobs:
           # 3. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 4. Išpakuojame šabloną
+          # 4. Išpakuojame šabloną, kad gautume originalų ramdiską
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 5. SUKURIAME NAUJĄ BOOT.IMG (Tavo 48MB sėkmė)
+          # 5. SUKURIAME NAUJĄ BOOT.IMG (Dabar bus pilnas ~60MB)
           python3 tools/mkbootimg.py \
             --kernel Image \
             --ramdisk unpacked/ramdisk \
@@ -165,16 +165,16 @@ jobs:
             -o HA_boot.img
 
           # 6. SUKURIAME HA_dtbo.img
-          # Naudojame *.dtbo failus, kuriuos matome tavo nuotraukoje
+          # Naudojame visus .dtbo failus, kuriuos matome tavo nuotraukoje (raw-kernel-build)
           python3 $MKDTBO_TOOL create HA_dtbo.img *.dtbo
           
-          echo "Patikriname ar abu failai sukurti:"
+          echo "Patikriname ar failai sukurti:"
           ls -lh HA_boot.img HA_dtbo.img
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-Final-Images-Ready
+          name: HA-Server-A16-READY-FINAL
           path: |
             HA_boot.img
             HA_dtbo.img
