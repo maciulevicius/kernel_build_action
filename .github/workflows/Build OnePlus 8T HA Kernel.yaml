@@ -106,9 +106,11 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # PATAISYMAS: Išjungiam interaktyvumą teisingai
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' out/.config
-          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_NONE=y/g' out/.config
+          # Išjungiam interaktyvumą - pašalinam visus LTO/WERROR nustatymus iš .config
+          sed -i '/CONFIG_LTO/d' out/.config
+          sed -i '/CONFIG_WERROR/d' out/.config
+          echo "CONFIG_LTO_NONE=y" >> out/.config
+          echo "CONFIG_WERROR=n" >> out/.config
           
           make O=out ARCH=arm64 olddefconfig
           make -j$(nproc --all) O=out ARCH=arm64 \
@@ -119,22 +121,20 @@ jobs:
 
       - name: Package Boot and DTBO Images
         run: |
-          # 1. Atsisiunčiame magiskboot, skirtą Linux x86_64 naudojant tavo linką
-          curl -LSsL "https://github.com/magojohnji/magiskboot-linux/raw/refs/heads/main/x86_64/magiskboot" -o magiskboot
+          # 1. Atsisiunčiame magiskboot iš tavo nurodyto šaltinio
+          curl -LSsL "https://github.com/alitekin2fx/magiskboot/raw/master/magiskboot" -o magiskboot
           chmod +x magiskboot
           
-          # 2. Atsisiunčiame Singularity V1.2.5 šabloną (boot.img)
+          # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Paruošiame tavo naują DTB (Sujungiame visus sukompiliuotus failus)
-          # Tai užtikrins, kad Docker ir USB resursai būtų teisingai aprašyti
+          # 3. Paruošiame tavo naują DTB (OnePlus 8T "Header v3" reikalauja atskiro dtb failo)
           find kernel/out -name "*.dtb" -exec cat {} + > dtb_merged
           
           # 4. Sukeičiame komponentus šablone
           ./magiskboot unpack template_boot.img
           
-          # magiskboot unpack ištraukia failus pavadinimais 'kernel' ir 'dtb'
-          # Mes juos pakeičiame tavo naujai sukompiliuotais
+          # Pakeičiame kernelį ir dtb į tavo naujai sukompiliuotus
           cp kernel/out/arch/arm64/boot/Image.gz kernel
           cp dtb_merged dtb
           
@@ -142,7 +142,6 @@ jobs:
           ./magiskboot repack template_boot.img HA_boot.img
 
           # 6. Sukuriame DTBO.img naudojant tavo sukompiliuotus .dtbo failus
-          # mkdtboimg.py skriptas surandamas automatiškai
           DTBO_SCRIPT=$(find kernel -name "mkdtboimg.py" | head -n 1)
           DTBO_FILES=$(find kernel/out -name "*.dtbo")
           
