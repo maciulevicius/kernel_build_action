@@ -106,14 +106,11 @@ jobs:
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # PATAISYMAS: Užtikriname, kad jokie klausimai nebebus užduodami
-          scripts/config --file out/.config --set-str LTO_NONE y
-          scripts/config --file out/.config --disable LTO_CLANG
-          scripts/config --file out/.config --disable LTO_CLANG_THIN
-          scripts/config --file out/.config --disable WERROR
+          # PATAISYMAS: Išjungiam interaktyvumą teisingai
+          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' out/.config
+          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_NONE=y/g' out/.config
           
           make O=out ARCH=arm64 olddefconfig
-          
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang LLVM=1 LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -122,25 +119,18 @@ jobs:
 
       - name: Package Boot and DTBO Images
         run: |
-          # 1. Atsisiunčiame ir paruošiame tavo nurodytą magiskboot
-          curl -LSsL "https://github.com/svoboda18/magiskboot/releases/download/1.0-3/magiskboot.zip" -o magiskboot.zip
-          unzip magiskboot.zip
-          # Naudojame x86_64 versiją, nes GitHub Actions veikia Ubuntu PC aplinkoje
-          chmod +x x86_64/magiskboot
-          ln -s x86_64/magiskboot magiskboot
-
+          # 1. Atsisiunčiame magiskboot, kuris veikia LINUX aplinkoje
+          curl -LSsL "https://github.com/osm0sis/AnyKernel3/raw/master/tools/magiskboot" -o magiskboot
+          chmod +x magiskboot
+          
           # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
           # 3. Paruošiame DTB (Sujungiame visus tavo sukompiliuotus DTB failus)
-          # Tai kritiškai svarbu OnePlus 8T "Header v3" struktūrai
           find kernel/out -name "*.dtb" -exec cat {} + > dtb_merged
           
           # 4. Sukeičiame branduolį ir DTB šablone
           ./magiskboot unpack template_boot.img
-          
-          # magiskboot unpack ištraukia failus pavadinimais 'kernel', 'dtb' ir t.t.
-          # Mes juos perrašome tavo naujais failais
           cp kernel/out/arch/arm64/boot/Image.gz kernel
           cp dtb_merged dtb
           
@@ -148,14 +138,13 @@ jobs:
           ./magiskboot repack template_boot.img HA_boot.img
 
           # 6. Sukuriame DTBO.img naudojant tavo sukompiliuotus .dtbo failus
-          # Surandame mkdtboimg.py skriptą branduolio šaltinyje
           DTBO_SCRIPT=$(find kernel -name "mkdtboimg.py" | head -n 1)
           python3 $DTBO_SCRIPT create HA_dtbo.img $(find kernel/out -name "*.dtbo")
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-A16-Images
+          name: HA-Server-Final-A16
           path: |
             HA_boot.img
             HA_dtbo.img
