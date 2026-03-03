@@ -29,7 +29,6 @@ jobs:
           cd kernel
           sed -i '/kernelsu/d' drivers/Kconfig
           
-          # Ištaisome schgm-flash.c
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/module.h>
           #include <linux/types.h>
@@ -42,7 +41,6 @@ jobs:
           bool is_flash_active(struct smb_charger *chg) { return false; }
           EOF
 
-          # Ištaisome oplus_stubs.c
           cat <<EOF > drivers/oplus_stubs.c
           #include <linux/kernel.h>
           #include <linux/export.h>
@@ -106,7 +104,6 @@ jobs:
           } >> out/.config
           
           make O=out ARCH=arm64 olddefconfig
-          # BILDINAME 'Image' (ne Image.gz), kad atitiktų Singularity formatą
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang LLVM=1 LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
@@ -118,9 +115,12 @@ jobs:
           mkdir -p raw_files
           cp kernel/out/arch/arm64/boot/Image raw_files/
           find kernel/out -name "*.dtb" -exec cat {} + > raw_files/dtb_merged
-          find kernel/out -name "*.dtbo" -exec cp -t raw_files/ {} +
+          # Surenkame .dtbo failus
+          find kernel/out -name "*.dtbo" -exec cp {} raw_files/ \;
+          # Pasiimame patį įrankį iš kernelio source!
+          find kernel -name "mkdtboimg.py" -exec cp {} raw_files/ \;
 
-      - name: Upload Raw Build
+      - name: Upload Raw Kernel Files
         uses: actions/upload-artifact@v4
         with:
           name: raw-kernel-build
@@ -137,18 +137,17 @@ jobs:
 
       - name: Package Images
         run: |
-          # 1. Paruošiame įrankius
+          # 1. Paruošiame LineageOS įrankius
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
           export PYTHONPATH=$PYTHONPATH:$(pwd)/tools
-          curl -LSsL "https://raw.githubusercontent.com/osm0sis/AnyKernel3/master/tools/mkdtboimg.py" -o mkdtboimg.py
 
-          # 2. Atsisiunčiame šabloną
+          # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Išpakuojame
+          # 3. Išpakuojame šabloną
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 4. Sukuriame HA_boot.img (Naudojame ne suspaustą 'Image')
+          # 4. Sukuriame HA_boot.img (Dabar tikrai bus ~60MB)
           python3 tools/mkbootimg.py \
             --kernel Image \
             --ramdisk unpacked/ramdisk \
@@ -160,13 +159,19 @@ jobs:
             --os_patch_level 2026-02 \
             -o HA_boot.img
 
-          # 5. Sukuriame HA_dtbo.img
-          python3 mkdtboimg.py create HA_dtbo.img $(ls *.dtbo)
+          # 5. Sukuriame HA_dtbo.img (Naudojame iš Job 1 atsineštą įrankį)
+          DTBO_FILES=$(ls *.dtbo 2>/dev/null || echo "")
+          if [ -f "mkdtboimg.py" ] && [ -n "$DTBO_FILES" ]; then
+            python3 mkdtboimg.py create HA_dtbo.img $DTBO_FILES
+            echo "dtbo.img sėkmingai sukurtas!"
+          else
+            echo "ĮSPĖJIMAS: dtbo failai nerasti!"
+          fi
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-Ready
+          name: HA-Server-Final-Images
           path: |
             HA_boot.img
             HA_dtbo.img
