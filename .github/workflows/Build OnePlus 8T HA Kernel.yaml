@@ -127,7 +127,7 @@ jobs:
           name: raw-kernel-build
           path: raw_files/
 
-  package-images:
+ package-images:
     needs: build-kernel
     runs-on: ubuntu-22.04
     steps:
@@ -135,26 +135,29 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: raw-kernel-build
-          # Atsisiunčiame failus tiesiai į darbinį aplanką
-          path: .
+          # Atsisiunčiame failus į specifinį aplanką
 
       - name: Package Images
         run: |
-          # 1. Parsisiunčiame boot.img įrankius
+          # 1. PERKELIAME failus iš artifact aplanko į darbinį aplanką
+          # Tai išspręs "failai nerasti" klaidą
+          mv raw-kernel-build/* .
+
+          # 2. Parsisiunčiame LineageOS įrankius (boot.img paketavimui)
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
           export PYTHONPATH=$PYTHONPATH:$(pwd)/tools
 
-          # 2. Parsisiunčiame dtbo įrankį (Google oficialų)
+          # 3. Parsisiunčiame oficialų DTBO įrankį (iš LineageOS repo)
           git clone --depth 1 https://github.com/LineageOS/android_system_libufdt libufdt
           MKDTBO_TOOL=$(pwd)/libufdt/utils/src/mkdtboimg.py
 
-          # 3. Atsisiunčiame Singularity V1.2.5 šabloną
+          # 4. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 4. Išpakuojame šabloną
+          # 5. Išpakuojame šabloną
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 5. SUKURIAME NAUJĄ BOOT.IMG (Dabar tikrai bus ~60MB)
+          # 6. SUKURIAME NAUJĄ BOOT.IMG (Dabar pavyks, nes Image ir dtb_merged jau čia)
           python3 tools/mkbootimg.py \
             --kernel Image \
             --ramdisk unpacked/ramdisk \
@@ -166,17 +169,17 @@ jobs:
             --os_patch_level 2026-02 \
             -o HA_boot.img
 
-          # 6. SUKURIAME HA_dtbo.img
-          # Naudojame visus .dtbo failus, kuriuos matome tavo nuotraukoje
-          python3 $MKDTBO_TOOL create HA_dtbo.img kona-instantnoodle-overlay.dtbo kona-instantnoodlep-overlay.dtbo kona-kebab-overlay.dtbo kona-lemonades-overlay.dtbo
+          # 7. SUKURIAME HA_dtbo.img
+          # Naudojame visus .dtbo failus, kurie atkeliavo su artifactu
+          python3 $MKDTBO_TOOL create HA_dtbo.img *.dtbo
           
-          echo "Patikriname rezultatus:"
+          echo "Sėkmė! Failai sukurti:"
           ls -lh HA_boot.img HA_dtbo.img
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-Final-A16-Ready
+          name: HA-Server-A16-READY-FOR-FLASH
           path: |
             HA_boot.img
             HA_dtbo.img
