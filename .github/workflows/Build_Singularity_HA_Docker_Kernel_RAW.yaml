@@ -1,0 +1,132 @@
+name: Build Singularity HA-Docker Kernel RAW Artifacts
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
+
+      - name: Clone Toolchain
+        run: |
+          git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
+          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
+
+      - name: Clone Singularity Kernel
+        run: |
+          # Naudojame tavo nurodytą branch'ą
+          git clone --depth 1 -b interconnect https://github.com/The-Anomalist/Singularity.git kernel
+
+      - name: Patch Kernel Source (Fixes & Stubs)
+        run: |
+          cd kernel
+          # 1. Pašaliname trūkstamą KernelSU nuorodą
+          sed -i '/kernelsu/d' drivers/Kconfig
+          
+          # 2. Ištaisome schgm-flash.c (Blykstės krovimo klaida)
+          cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
+          #include <linux/module.h>
+          #include <linux/types.h>
+          struct smb_charger {};
+          struct smb_irq_data { void *parent_data; char *name; };
+          enum torch_mode { TORCH_DISABLED, TORCH_LOW, TORCH_HIGH };
+          int schgm_flash_get_vreg_ok(struct smb_charger *chg, int *val) { return 0; }
+          void schgm_flash_torch_priority(struct smb_charger *chg, enum torch_mode mode) {}
+          int schgm_flash_init(struct smb_charger *chg) { return 0; }
+          bool is_flash_active(struct smb_charger *chg) { return false; }
+          EOF
+
+          # 3. Ištaisome oplus_stubs.c (OnePlus 8T ID: 20801)
+          cat <<EOF > drivers/oplus_stubs.c
+          #include <linux/kernel.h>
+          #include <linux/export.h>
+          int oplus_vooc_adapter_update_is_rx_gpio(void) { return 0; }
+          int oplus_vooc_adapter_update_is_tx_gpio(void) { return 0; }
+          int get_project(void) { return 20801; }
+          int qpnp_is_power_off_charging(void) { return 0; }
+          int get_boot_mode(void) { return 0; }
+          void switch_to_otg_mode(int mode) { }
+          int opchg_set_pd_sdp(int val) { return 0; }
+          int oplus_vooc_get_fastchg_started(void) { return 0; }
+          int oplus_vooc_get_fastchg_ing(void) { return 0; }
+          int oplus_gauge_init(void *data) { return 0; }
+          int get_PCB_Version(void) { return 0; }
+          void switch_headset_state(int state) { }
+          int msm_drm_notifier_call_chain(unsigned long val, void *v) { return 0; }
+          void opticalfp_irq_handler_register(void *handler) { }
+          int is_project(int project) { if (project == 20801) return 1; return 0; }
+          EXPORT_SYMBOL(msm_drm_notifier_call_chain);
+          EOF
+          echo "obj-y += oplus_stubs.o" >> drivers/Makefile
+
+      - name: Build Kernel
+        run: |
+          cd kernel
+          export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          make O=out ARCH=arm64 vendor/kona-perf_defconfig
+          
+          # Konfigūracijos modifikavimas (Docker, Zigbee, Storage, PSTORE)
+          CONF="out/.config"
+          sed -i '/CONFIG_LTO/d' $CONF
+          sed -i '/CONFIG_WERROR/d' $CONF
+          {
+            echo "CONFIG_LTO_NONE=y"
+            echo "CONFIG_WERROR=n"
+            echo "CONFIG_NAMESPACES=y"
+            echo "CONFIG_NET_NS=y"
+            echo "CONFIG_PID_NS=y"
+            echo "CONFIG_IPC_NS=y"
+            echo "CONFIG_UTS_NS=y"
+            echo "CONFIG_CGROUPS=y"
+            echo "CONFIG_MEMCG=y"
+            echo "CONFIG_OVERLAY_FS=y"
+            echo "CONFIG_VETH=y"
+            echo "CONFIG_BRIDGE=y"
+            echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
+            echo "CONFIG_IP_NF_NAT=y"
+            echo "CONFIG_IP_NF_TARGET_MASQUERADE=y"
+            echo "CONFIG_USB_SERIAL=y"
+            echo "CONFIG_USB_SERIAL_CP210X=y"
+            echo "CONFIG_USB_SERIAL_CH341=y"
+            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
+            echo "CONFIG_USB_ACM=y"
+            echo "CONFIG_USB_STORAGE=y"
+            echo "CONFIG_BLK_DEV_SD=y"
+            echo "CONFIG_EXT4_FS=y"
+            echo "CONFIG_FUSE_FS=y"
+            echo "CONFIG_PSTORE=y"
+            echo "CONFIG_PSTORE_CONSOLE=y"
+            echo "CONFIG_PSTORE_RAM=y"
+          } >> $CONF
+          
+          make O=out ARCH=arm64 olddefconfig
+          # Buildiname 'Image' (ne-suspaustą), nes magiskboot repack jį geriau priima
+          make -j$(nproc --all) O=out ARCH=arm64 \
+            CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-w" Image dtbs
+
+      - name: Collect Raw Files
+        run: |
+          mkdir -p final_raw_files
+          # Pasiimame patį branduolį
+          cp kernel/out/arch/arm64/boot/Image final_raw_files/
+          # Sujungiame visus DTB į vieną failą
+          find kernel/out -name "*.dtb" -exec cat {} + > final_raw_files/dtb_merged
+          # Nukopijuojame visus .dtbo fragmentus (geleižies valdymui)
+          find kernel/out -name "*.dtbo" -exec cp {} final_raw_files/ \;
+          # Pasiimame mkdtboimg.py skriptą iš kodo (kad nereiktų ieškoti)
+          find kernel -name "mkdtboimg.py" -exec cp {} final_raw_files/ \;
+
+      - name: Upload Raw Kernel Build
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-kernel-build
+          path: final_raw_files/
