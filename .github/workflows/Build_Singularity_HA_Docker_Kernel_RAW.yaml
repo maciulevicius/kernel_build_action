@@ -1,94 +1,45 @@
-name: Build Singularity V1.2.5 HA-Docker-Final
+name: Build Lineage-23-kebab-Docker-Final
 on:
   workflow_dispatch:
 
 jobs:
-  build-kernel:
+  build:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Environment
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip lz4
-
+      - uses: actions/checkout@v4
+      - name: Setup
+        run: sudo apt-get update && sudo apt-get install -y bc bison build-essential flex git libelf-dev libssl-dev make python3 curl zip lz4
       - name: Toolchain
-        run: |
-          git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
-          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
-
+        run: git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
       - name: Source
-        run: git clone --depth 1 --branch V1.2.5 https://github.com/The-Anomalist/Singularity.git kernel
-
-      - name: "Deep Patch"
-        run: |
-          cd kernel
-          # Ištaisome include klaidą ne pačioje pradžioje, o po sisteminių bibliotekų
-          sed -i '/#include <linux\/module.h>/a #include "smb5-lib.h"' drivers/power/supply/qcom/schgm-flash.c
-          
-          # Išvalome visus galimus senus configus
-          make clean && make mrproper
-
+        run: git clone --depth 1 -b lineage-22.1 https://github.com/LineageOS/android_kernel_oneplus_sm8250 kernel
       - name: Build
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
+          make O=out ARCH=arm64 vendor/kebab_perf_defconfig
           
-          # Bazinė konfigūracija
-          make O=out ARCH=arm64 vendor/kona-perf_defconfig
+          # ĮJUNGIAME DOCKER PER SCRIPTS/CONFIG
+          ./scripts/config --file out/.config -e NAMESPACES -e NET_NS -e PID_NS -e IPC_NS -e UTS_NS -e USER_NS -e CGROUPS -e MEMCG -e OVERLAY_FS -e VETH -e BRIDGE -e IKCONFIG -e IKCONFIG_PROC
           
-          # DOCKER REIKALAVIMAI (Naudojame skriptą, kad užtikrintume priklausomybes)
-          scripts/config --file out/.config -e NAMESPACES
-          scripts/config --file out/.config -e NET_NS
-          scripts/config --file out/.config -e PID_NS
-          scripts/config --file out/.config -e IPC_NS
-          scripts/config --file out/.config -e UTS_NS
-          scripts/config --file out/.config -e CGROUPS
-          scripts/config --file out/.config -e MEMCG
-          scripts/config --file out/.config -e USER_NS
-          scripts/config --file out/.config -e OVERLAY_FS
-          scripts/config --file out/.config -e VETH
-          scripts/config --file out/.config -e BRIDGE
-          scripts/config --file out/.config -e IKCONFIG
-          scripts/config --file out/.config -e IKCONFIG_PROC
+          # IŠJUNGIAME LTO - TAI YRA SVARBIAUSIA, KAD VEIKTŲ!
+          ./scripts/config --file out/.config -d LTO_CLANG
+          ./scripts/config --file out/.config -e LTO_NONE
           
-          # OPLUS FIX (Priverstinai įjungia tai, kas dingsta)
-          scripts/config --file out/.config -e OPLUS_FEATURE_SOC_INFO
-          scripts/config --file out/.config -e OPLUS_PROJECT_INFO
-          
-          # SVARBU: Išjungiam LTO, jei metamos linker klaidos (tai padės telefonui pasileisti!)
-          scripts/config --file out/.config -d LTO_CLANG
-          scripts/config --file out/.config -e LTO_NONE
-
           make O=out ARCH=arm64 olddefconfig
+          make -j$(nproc --all) O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- Image.gz dtbs
 
-          # KOMPILIUOJAME Image.lz4 (tai išspręs dydžio problemą)
-          make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang \
-            NM=llvm-nm \
-            OBJCOPY=llvm-objcopy \
-            OBJDUMP=llvm-objdump \
-            STRIP=llvm-strip \
-            LLVM=1 \
-            LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            Image.lz4 dtbs
-
-      - name: AnyKernel3 (Teisingas pakavimas)
+      - name: Create Flashable Zip (AnyKernel3)
         run: |
           git clone https://github.com/osm0sis/AnyKernel3.git
           cd AnyKernel3
-          cp ../kernel/out/arch/arm64/boot/Image.lz4 .
-          find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cat {} + > dtb
-          # Nustatymai kebabui
+          cp ../kernel/out/arch/arm64/boot/Image.gz .
+          # Čia surinksime visus DTB, kad tavo telefonas pasileistų
+          find ../kernel/out/arch/arm64/boot/dts/vendor/qcom/ -name "*.dtb" -exec cat {} + > dtb
           sed -i 's/device.name1=maguro/device.name1=kebab/g' anykernel.sh
-          zip -r ../Singularity-Docker.zip *
-
+          zip -r ../Kebab-Docker-Kernel.zip *
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Singularity-Kebab-Docker
-          path: Singularity-Docker.zip
+          name: Kebab-Kernel-Docker
+          path: Kebab-Docker-Kernel.zip
