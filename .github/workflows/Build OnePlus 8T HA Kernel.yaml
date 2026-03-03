@@ -121,27 +121,35 @@ jobs:
 
       - name: Package Boot and DTBO Images
         run: |
-          # 1. Atsisiunčiame magiskboot (Linux x86_64), kurį nurodei
-          curl -LSsL "https://github.com/alitekin2fx/magiskboot/raw/master/magiskboot" -o magiskboot
+          # 1. Atsisiunčiame magiskboot (Linux x86_64 versija iš tavo nurodytos repo)
+          curl -LSsL "https://github.com/magojohnji/magiskboot-linux/raw/main/x86_64/magiskboot" -o magiskboot
           chmod +x magiskboot
           
           # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
           # 3. Paruošiame tavo naują DTB (Sujungiame visus sukompiliuotus failus)
+          # Tai kritiškai svarbu, kad OnePlus 8T neberodytų geltonų raidžių
           find kernel/out -name "*.dtb" -exec cat {} + > dtb_merged
           
           # 4. Sukeičiame komponentus šablone
-          # SVARBU: Pridėjome -- brūkšnelius, kad magiskboot suprastų komandą
-          ./magiskboot --unpack template_boot.img
+          ./magiskboot unpack template_boot.img
           
-          # magiskboot unpack ištraukia failus pavadinimais 'kernel' ir 'dtb'
-          # Mes juos perrašome tavo naujai sukompiliuotais
+          # magiskboot unpack ištraukia failus: 'kernel', 'dtb', 'ramdisk.cpio'
+          # Mes juos pakeičiame tavo naujai sukompiliuotais
           cp kernel/out/arch/arm64/boot/Image.gz kernel
           cp dtb_merged dtb
           
           # 5. Supakuojame naują boot.img
-          ./magiskboot --repack template_boot.img HA_boot.img
+          ./magiskboot repack template_boot.img HA_boot.img
+          
+          # Patikriname failo dydį (turi būti > 50MB)
+          SIZE=$(stat -c%s "HA_boot.img")
+          echo "HA_boot.img dydis: $SIZE baitai"
+          if [ $SIZE -lt 10000000 ]; then
+            echo "KLAIDA: Paketavimas nepavyko, failas per mažas!"
+            exit 1
+          fi
 
           # 6. Sukuriame DTBO.img naudojant tavo sukompiliuotus .dtbo failus
           DTBO_SCRIPT=$(find kernel -name "mkdtboimg.py" | head -n 1)
@@ -151,13 +159,13 @@ jobs:
             python3 $DTBO_SCRIPT create HA_dtbo.img $DTBO_FILES
             echo "dtbo.img sėkmingai sukurtas!"
           else
-            echo "ĮSPĖJIMAS: dtbo.img nebuvo sukurtas"
+            echo "ĮSPĖJIMAS: DTBO failai arba skriptas nerasti."
           fi
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-A16-Images
+          name: HA-Server-A16-Ready
           path: |
             HA_boot.img
             HA_dtbo.img
