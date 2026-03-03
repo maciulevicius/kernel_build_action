@@ -149,7 +149,7 @@ jobs:
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
           # 4. SUKURIAME NAUJĄ BOOT.IMG
-          # Naudojame Image.gz, unpacked/ramdisk ir dtb_merged
+          # Naudojame Image.gz, originalų ramdiską ir tavo sukompiliuotą dtb_merged
           python3 tools/mkbootimg.py \
             --kernel Image.gz \
             --ramdisk unpacked/ramdisk \
@@ -161,14 +161,21 @@ jobs:
             --os_patch_level 2026-02 \
             -o HA_boot.img
 
-          # 5. Sukuriame DTBO.img (PATAISYTA NUORODA)
-          curl -LSsL "https://raw.githubusercontent.com/osm0sis/AnyKernel3/master/tools/mkdtboimg.py" -o mkdtboimg.py
-          python3 mkdtboimg.py create HA_dtbo.img $(ls *.dtbo)
+          # 5. Sukuriame DTBO.img (NAUJA VEIKIANTI NUORODA)
+          curl -LSsL "https://raw.githubusercontent.com/osm0sis/mkdtboimg/master/mkdtboimg.py" -o mkdtboimg_tool.py
+          # Surandame visus .dtbo failus, kuriuos paruošė Job 1
+          DTBO_FILES=$(ls *.dtbo 2>/dev/null || echo "")
+          if [ -n "$DTBO_FILES" ]; then
+            python3 mkdtboimg_tool.py create HA_dtbo.img $DTBO_FILES
+            echo "dtbo.img sėkmingai sukurtas!"
+          else
+            echo "ĮSPĖJIMAS: .dtbo failai nerasti, HA_dtbo.img nebus sukurtas."
+          fi
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-Final-Ready
+          name: HA-Server-A16-Ready
           path: |
             HA_boot.img
             HA_dtbo.img
