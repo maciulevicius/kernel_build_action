@@ -18,66 +18,69 @@ jobs:
       - name: Clone Toolchain
         run: |
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
+          # Pridedame visą bin aplanką į PATH
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
       - name: Clone Singularity V1.2.5 Tag
         run: |
-          # Naudojame --branch su tago pavadinimu - tai teisingas būdas klonuoti tagą
           git clone --depth 1 --branch V1.2.5 https://github.com/The-Anomalist/Singularity.git kernel
 
       - name: Patch for Compilation
         run: |
           cd kernel
-          # 1. Pašaliname KernelSU (nes neturime jo kodo)
+          # 1. Pašaliname KernelSU nuorodas, nes jos trukdo kompiliacijai be šaltinio kodo
           sed -i '/kernelsu/d' drivers/Kconfig
+          sed -i '/kernelsu/d' drivers/Makefile
           
-          # 2. Ištaisome schgm-flash.c (Tikras pataisymas, be stubų)
-          sed -i '1i#include "smb5-lib.h"' drivers/power/supply/qcom/schgm-flash.c
+          # 2. IŠTAISYTA: Įterpiame bibliotekas teisinga tvarka
+          # Pirmiausia įtraukiame sisteminę power_supply, o tik tada vietinę smb5-lib
+          sed -i '1i#include <linux/power_supply.h>\n#include "smb5-lib.h"' drivers/power/supply/qcom/schgm-flash.c
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           
-          # Sukuriame out aplanką ir nustatome bazinį defconfig
+          # Nustatome bazinį defconfig
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # ĮJUNGIAME DOCKER/USB (Neliečiame LTO ar kitų parametrų!)
+          # ĮJUNGIAME PILNĄ DOCKER PALAIKYMĄ
           {
             echo "CONFIG_NAMESPACES=y"
             echo "CONFIG_NET_NS=y"
             echo "CONFIG_PID_NS=y"
             echo "CONFIG_IPC_NS=y"
             echo "CONFIG_UTS_NS=y"
+            echo "CONFIG_USER_NS=y" # Labai svarbu Docker saugumui
             echo "CONFIG_CGROUPS=y"
+            echo "CONFIG_CGROUP_PIDS=y"
             echo "CONFIG_MEMCG=y"
+            echo "CONFIG_CPUSETS=y"
+            echo "CONFIG_CGROUP_DEVICE=y"
+            echo "CONFIG_CGROUP_CPUACCT=y"
             echo "CONFIG_OVERLAY_FS=y"
             echo "CONFIG_VETH=y"
             echo "CONFIG_BRIDGE=y"
             echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
             echo "CONFIG_IP_NF_NAT=y"
             echo "CONFIG_IP_NF_TARGET_MASQUERADE=y"
+            echo "CONFIG_IKCONFIG=y" # Leis Docker patikrinti branduolio konfigūraciją
+            echo "CONFIG_IKCONFIG_PROC=y"
             echo "CONFIG_USB_SERIAL=y"
             echo "CONFIG_USB_SERIAL_CP210X=y"
             echo "CONFIG_USB_SERIAL_CH341=y"
             echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
-            echo "CONFIG_USB_ACM=y"
-            echo "CONFIG_USB_STORAGE=y"
-            echo "CONFIG_BLK_DEV_SD=y"
-            echo "CONFIG_EXT4_FS=y"
-            echo "CONFIG_FUSE_FS=y"
-            echo "CONFIG_PSTORE=y"
-            echo "CONFIG_PSTORE_CONSOLE=y"
-            echo "CONFIG_PSTORE_RAM=y"
           } >> out/.config
           
           # Priverčiame priimti visus pakeitimus
-          yes "" | make O=out ARCH=arm64 olddefconfig
+          make O=out ARCH=arm64 olddefconfig
           
-          # KOMPILIUOJAME (Tavo rasta komanda)
-          # Pridėjau LLVM=1 ir LLVM_IAS=1, nes tai kritiška LTO veikimui
+          # KOMPILIUOJAME
+          # Naudojame visus LLVM įrankius (clang, ld.lld, llvm-ar), kad išvengtume LSE atomics klaidų
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang LLVM=1 LLVM_IAS=1 \
+            CC=clang \
+            LLVM=1 \
+            LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
             KCFLAGS="-w" Image dtbs
@@ -85,13 +88,12 @@ jobs:
       - name: Prepare Files
         run: |
           mkdir -p raw_artifacts
-          cp kernel/out/arch/arm64/boot/Image raw_artifacts/
+          [ -f kernel/out/arch/arm64/boot/Image ] && cp kernel/out/arch/arm64/boot/Image raw_artifacts/
           find kernel/out -name "*.dtb" -exec cat {} + > raw_artifacts/dtb_merged
           find kernel/out -name "*.dtbo" -exec cp {} raw_artifacts/ \;
-          find kernel -name "mkdtboimg.py" -exec cp {} raw_artifacts/ \;
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: raw-kernel-V125
+          name: Singularity-Kona-Docker-V125
           path: raw_artifacts/
