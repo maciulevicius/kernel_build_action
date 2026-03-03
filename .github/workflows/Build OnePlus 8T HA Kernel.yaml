@@ -126,7 +126,7 @@ jobs:
           name: raw-kernel-build
           path: raw_files/
 
-  package-images:
+ package-images:
     needs: build-kernel
     runs-on: ubuntu-22.04
     steps:
@@ -137,39 +137,40 @@ jobs:
 
       - name: Package Images
         run: |
-          # 1. Parsisiunčiame VISUS LineageOS įrankius (tai išspręs GKI klaidą)
+          # 1. Paruošiame LineageOS įrankius
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
-          
+          export PYTHONPATH=$PYTHONPATH:$(pwd)/tools
+
           # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
           # 3. Išpakuojame šabloną
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 4. SUKURIAME NAUJĄ BOOT.IMG (Dabar tikrai bus pilnas ~60MB)
-          # Paleidžiame iš tools aplanko, kad Python matytų gki/ modulį
-          cd tools
-          python3 mkbootimg.py \
-            --kernel ../Image \
-            --ramdisk ../unpacked/ramdisk \
-            --dtb ../dtb_merged \
+          # 4. SUKURIAME NAUJĄ BOOT.IMG
+          python3 tools/mkbootimg.py \
+            --kernel Image \
+            --ramdisk unpacked/ramdisk \
+            --dtb dtb_merged \
             --header_version 2 \
             --pagesize 4096 \
             --cmdline "androidboot.hardware=qcom androidboot.memcg=1 androidboot.usbcontroller=a600000.dwc3 cgroup.memory=nokmem,nosocket loop.max_part=7 lpm_levels.sleep_disabled=1 msm_rtb.filter=0x237 reboot=panic_warm service_locator.enable=1 swiotlb=2048 kpti=off" \
             --os_version 16.0.0 \
             --os_patch_level 2026-02 \
-            -o ../HA_boot.img
-          cd ..
+            -o HA_boot.img
 
-          # 5. Sukuriame HA_dtbo.img (naudojame atsineštą įrankį)
-          if [ -f "mkdtboimg.py" ]; then
-            python3 mkdtboimg.py create HA_dtbo.img $(ls *.dtbo)
-          fi
+          # 5. SUKURIAME DTBO.IMG (Pataisytas įrankis)
+          # Atsisiunčiame mkdtboimg.py iš patikimo šaltinio
+          curl -LSsL "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/main/utils/src/mkdtboimg.py?format=TEXT" | base64 -d > mkdtboimg_tool.py
+          
+          # Naudojame tavo matomus .dtbo failus iš tavo nuotraukos
+          python3 mkdtboimg_tool.py create HA_dtbo.img kona-instantnoodle-overlay.dtbo kona-instantnoodlep-overlay.dtbo kona-kebab-overlay.dtbo kona-lemonades-overlay.dtbo
+          echo "HA_dtbo.img sėkmingai sukurtas!"
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-Final-Ready
+          name: HA-Server-A16-FINAL-SUCCESS
           path: |
             HA_boot.img
             HA_dtbo.img
