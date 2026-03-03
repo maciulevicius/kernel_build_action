@@ -136,17 +136,22 @@ jobs:
 
       - name: Package Images
         run: |
-          # 1. Paruošiame LineageOS įrankius
+          # 1. Parsisiunčiame boot.img įrankius (mkbootimg, unpack_bootimg)
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
           export PYTHONPATH=$PYTHONPATH:$(pwd)/tools
 
-          # 2. Atsisiunčiame Singularity V1.2.5 šabloną
+          # 2. Parsisiunčiame dtbo įrankį (mkdtboimg.py) - Šis būdas 100% veikia
+          git clone --depth 1 https://github.com/LineageOS/android_system_libufdt libufdt
+          MKDTBO=$(pwd)/libufdt/utils/src/mkdtboimg.py
+
+          # 3. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Išpakuojame šabloną
+          # 4. Išpakuojame šabloną
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 4. SUKURIAME NAUJĄ BOOT.IMG
+          # 5. SUKURIAME NAUJĄ BOOT.IMG
+          # Naudojame tavo 44MB 'Image' failą, kurį matėme tavo nuotraukoje
           python3 tools/mkbootimg.py \
             --kernel Image \
             --ramdisk unpacked/ramdisk \
@@ -158,18 +163,17 @@ jobs:
             --os_patch_level 2026-02 \
             -o HA_boot.img
 
-          # 5. SUKURIAME DTBO.IMG (Pataisytas įrankis)
-          # Atsisiunčiame mkdtboimg.py iš patikimo šaltinio
-          curl -LSsL "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/main/utils/src/mkdtboimg.py?format=TEXT" | base64 -d > mkdtboimg_tool.py
+          # 6. SUKURIAME DTBO.IMG
+          # Naudojame visus .dtbo failus iš tavo nuotraukos (build'as juos sėkmingai sugeneravo)
+          python3 $MKDTBO create HA_dtbo.img kona-instantnoodle-overlay.dtbo kona-instantnoodlep-overlay.dtbo kona-kebab-overlay.dtbo kona-lemonades-overlay.dtbo
           
-          # Naudojame tavo matomus .dtbo failus iš tavo nuotraukos
-          python3 mkdtboimg_tool.py create HA_dtbo.img kona-instantnoodle-overlay.dtbo kona-instantnoodlep-overlay.dtbo kona-kebab-overlay.dtbo kona-lemonades-overlay.dtbo
-          echo "HA_dtbo.img sėkmingai sukurtas!"
+          echo "Patikriname ar failai sukurti:"
+          ls -lh HA_boot.img HA_dtbo.img
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-A16-FINAL-SUCCESS
+          name: HA-Server-Final-Images-A16
           path: |
             HA_boot.img
             HA_dtbo.img
