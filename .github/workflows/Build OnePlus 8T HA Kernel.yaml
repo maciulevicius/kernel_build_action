@@ -20,16 +20,16 @@ jobs:
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone LineageOS Kernel
+      - name: Clone Singularity Kernel
         run: |
-          git clone --depth 1 -b interconnect https://github.com/The-Anomalist/Singularity kernel
+          git clone --depth 1 -b interconnect https://github.com/The-Anomalist/Singularity.git kernel
 
       - name: Patch Kernel Source and Config
         run: |
           cd kernel
           sed -i '/kernelsu/d' drivers/Kconfig
           
-          # Ištaisome draiverius (Stub'ai)
+          # Ištaisome schgm-flash.c (Blykstės draiveris)
           cat <<EOF > drivers/power/supply/qcom/schgm-flash.c
           #include <linux/module.h>
           #include <linux/types.h>
@@ -42,12 +42,13 @@ jobs:
           bool is_flash_active(struct smb_charger *chg) { return false; }
           EOF
 
+          # Ištaisome oplus_stubs.c (OnePlus specifika)
           cat <<EOF > drivers/oplus_stubs.c
           #include <linux/kernel.h>
           #include <linux/export.h>
           int oplus_vooc_adapter_update_is_rx_gpio(void) { return 0; }
           int oplus_vooc_adapter_update_is_tx_gpio(void) { return 0; }
-          int get_project(void) { return 20801; } // OnePlus 8T ID
+          int get_project(void) { return 20801; }
           int qpnp_is_power_off_charging(void) { return 0; }
           int get_boot_mode(void) { return 0; }
           void switch_to_otg_mode(int mode) { }
@@ -65,12 +66,9 @@ jobs:
           echo "obj-y += oplus_stubs.o" >> drivers/Makefile
 
           CONF="arch/arm64/configs/vendor/kona-perf_defconfig"
-          sed -i 's/CONFIG_LTO_CLANG=y/CONFIG_LTO_NONE=y/g' $CONF
-          sed -i 's/CONFIG_THINLTO=y/CONFIG_LTO_NONE=y/g' $CONF
           sed -i '/CONFIG_LTO/d' $CONF
+          sed -i '/CONFIG_LTO_CLANG/d' $CONF
           sed -i '/CONFIG_WERROR/d' $CONF
-          echo "CONFIG_LTO_NONE=y" >> $CONF
-          echo "CONFIG_WERROR=n" >> $CONF
 
           {
             echo "CONFIG_LTO_NONE=y"
@@ -100,39 +98,45 @@ jobs:
             echo "CONFIG_PSTORE=y"
             echo "CONFIG_PSTORE_CONSOLE=y"
             echo "CONFIG_PSTORE_RAM=y"
-            echo "CONFIG_PSTORE_PMSG=y"
           } >> $CONF
 
       - name: Build Kernel
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
-          # 1. Konfigūracija
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
-          
-          # 2. Kompiliavimas (Tavo nurodyta LLVM struktūra)
+          make O=out ARCH=arm64 olddefconfig
           make -j$(nproc --all) O=out ARCH=arm64 \
-            CC=clang \
-            LLVM=1 LLVM_IAS=1 \
-            CROSS_COMPILE=aarch64-linux-gnu- \
-            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            KCFLAGS="-w" \
-            Image.gz dtbs
+            CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            KCFLAGS="-w" Image.gz dtbs
 
-      - name: Create DTB and DTBO Image
+      - name: Package Boot and DTBO Images
         run: |
-          cd kernel
-          # Sujungiame visus DTB failus
-          find out -name "*.dtb" -exec cat {} + > out/dtb
+          # Atsisiunčiame magiskboot įrankį (x86_64 versija Linux)
+          curl -Lo magiskboot https://github.com/maciulevicius/kernel_build_action/raw/main/tools/magiskboot
+          chmod +x magiskboot
           
-          # Sukuriame DTBO.img (skriptas visada būna šioje vietoje Qualcomm branduoliuose)
-          python3 scripts/dtc/libfdt/mkdtboimg.py create out/dtbo.img $(find out -name "*.dtbo")
+          # Atsisiunčiame tavo naudojamą SINGULARITY RELEASINĮ BOOT.IMG (Template)
+          # Jei turi tikslų linką, pakeisk čia. Naudoju pavyzdį:
+          curl -Lo template_boot.img https://github.com/The-Anomalist/Singularity/releases/download/v4.19.325/magisk_patched.img
+
+          # 1. Paruošiame DTB
+          find kernel/out -name "*.dtb" -exec cat {} + > dtb_merged
           
-      - name: Upload Kernel Artifacts
+          # 2. Sukeičiame branduolį ir DTB šablone
+          ./magiskboot unpack template_boot.img
+          cp kernel/out/arch/arm64/boot/Image.gz kernel
+          cp dtb_merged dtb
+          ./magiskboot repack template_boot.img HA_boot.img
+
+          # 3. Sukuriame DTBO.img
+          DTBO_SCRIPT=$(find kernel -name "mkdtboimg.py" | head -n 1)
+          python3 $DTBO_SCRIPT create HA_dtbo.img $(find kernel/out -name "*.dtbo")
+
+      - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Kernel-Kebab-A16
+          name: HA-Server-Final-Images
           path: |
-            kernel/out/arch/arm64/boot/Image.gz
-            kernel/out/dtb
-            kernel/out/dtbo.img
+            HA_boot.img
+            HA_dtbo.img
