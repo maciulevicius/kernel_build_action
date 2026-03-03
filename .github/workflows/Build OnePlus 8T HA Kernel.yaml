@@ -135,7 +135,7 @@ jobs:
         with:
           name: raw-kernel-build
 
-      - name: Package Boot and DTBO
+      - name: Package Images
         run: |
           # 1. Paruošiame LineageOS įrankius
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
@@ -144,11 +144,11 @@ jobs:
           # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Išpakuojame šabloną, kad gautume originalų ramdiską
+          # 3. Išpakuojame šabloną
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 4. SUKURIAME NAUJĄ BOOT.IMG (~60MB)
-          # Naudojame Image (uncompressed), gautą iš Job 1
+          # 4. SUKURIAME NAUJĄ BOOT.IMG (Dabar tikrai bus ~60MB)
+          # Naudojame 'Image' (ne Image.gz), nes tavo build'as sugeneravo būtent jį
           python3 tools/mkbootimg.py \
             --kernel Image \
             --ramdisk unpacked/ramdisk \
@@ -160,16 +160,14 @@ jobs:
             --os_patch_level 2026-02 \
             -o HA_boot.img
 
-          # 5. Sukuriame DTBO.img (NAUJA VEIKIANTI NUORODA)
-          # Naudojame oficialią AOSP versiją
-          curl -LSs "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/main/utils/src/mkdtboimg.py?format=TEXT" | base64 -d > mkdtboimg_tool.py
-          
+          # 5. Sukuriame HA_dtbo.img
+          # Naudojame įrankį mkdtboimg.py, kurį pirmo žingsnio metu nukopijavome į raw_files
           DTBO_FILES=$(ls *.dtbo 2>/dev/null || echo "")
-          if [ -n "$DTBO_FILES" ]; then
-            python3 mkdtboimg_tool.py create HA_dtbo.img $DTBO_FILES
+          if [ -f "mkdtboimg.py" ] && [ -n "$DTBO_FILES" ]; then
+            python3 mkdtboimg.py create HA_dtbo.img $DTBO_FILES
             echo "dtbo.img sėkmingai sukurtas!"
           else
-            echo "ĮSPĖJIMAS: .dtbo failai nerasti, HA_dtbo.img nebus sukurtas."
+            echo "ĮSPĖJIMAS: mkdtboimg.py arba .dtbo failai nerasti. Praleidžiame."
           fi
 
       - name: Upload Final Images
