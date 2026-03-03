@@ -138,17 +138,21 @@ jobs:
 
       - name: Package Images
         run: |
-          # 1. Parsisiunčiame LineageOS įrankius
+          # 1. Parsisiunčiame LineageOS boot.img įrankius (mkbootimg, unpack_bootimg)
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
           export PYTHONPATH=$PYTHONPATH:$(pwd)/tools
 
-          # 2. Atsisiunčiame Singularity V1.2.5 šabloną
+          # 2. Parsisiunčiame oficialų DTBO įrankį (mkdtboimg.py)
+          git clone --depth 1 https://github.com/LineageOS/android_system_libufdt libufdt
+          MKDTBO_TOOL=$(pwd)/libufdt/utils/src/mkdtboimg.py
+
+          # 3. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Išpakuojame šabloną
+          # 4. Išpakuojame šabloną
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 4. SUKURIAME NAUJĄ BOOT.IMG (apie 60MB)
+          # 5. SUKURIAME NAUJĄ BOOT.IMG (Tavo 48MB sėkmė)
           python3 tools/mkbootimg.py \
             --kernel Image \
             --ramdisk unpacked/ramdisk \
@@ -160,15 +164,12 @@ jobs:
             --os_patch_level 2026-02 \
             -o HA_boot.img
 
-          # 5. Sukuriame HA_dtbo.img (naudojame įrankį iš Job 1)
-          DTBO_FILES=$(ls *.dtbo 2>/dev/null || echo "")
-          if [ -f "mkdtboimg.py" ] && [ -n "$DTBO_FILES" ]; then
-            python3 mkdtboimg.py create HA_dtbo.img $DTBO_FILES
-            echo "dtbo.img sėkmingai sukurtas!"
-          else
-            echo "KLAIDA: mkdtboimg.py arba .dtbo failai nerasti!"
-            exit 1
-          fi
+          # 6. SUKURIAME HA_dtbo.img
+          # Naudojame *.dtbo failus, kuriuos matome tavo nuotraukoje
+          python3 $MKDTBO_TOOL create HA_dtbo.img *.dtbo
+          
+          echo "Patikriname ar abu failai sukurti:"
+          ls -lh HA_boot.img HA_dtbo.img
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
