@@ -121,25 +121,27 @@ jobs:
 
       - name: Package Boot and DTBO Images
         run: |
-          # 1. Atsisiunčiame magiskboot iš tavo nurodyto šaltinio
+          # 1. Atsisiunčiame magiskboot (Linux x86_64), kurį nurodei
           curl -LSsL "https://github.com/alitekin2fx/magiskboot/raw/master/magiskboot" -o magiskboot
           chmod +x magiskboot
           
           # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Paruošiame tavo naują DTB (OnePlus 8T "Header v3" reikalauja atskiro dtb failo)
+          # 3. Paruošiame tavo naują DTB (Sujungiame visus sukompiliuotus failus)
           find kernel/out -name "*.dtb" -exec cat {} + > dtb_merged
           
           # 4. Sukeičiame komponentus šablone
-          ./magiskboot unpack template_boot.img
+          # SVARBU: Pridėjome -- brūkšnelius, kad magiskboot suprastų komandą
+          ./magiskboot --unpack template_boot.img
           
-          # Pakeičiame kernelį ir dtb į tavo naujai sukompiliuotus
+          # magiskboot unpack ištraukia failus pavadinimais 'kernel' ir 'dtb'
+          # Mes juos perrašome tavo naujai sukompiliuotais
           cp kernel/out/arch/arm64/boot/Image.gz kernel
           cp dtb_merged dtb
           
           # 5. Supakuojame naują boot.img
-          ./magiskboot repack template_boot.img HA_boot.img
+          ./magiskboot --repack template_boot.img HA_boot.img
 
           # 6. Sukuriame DTBO.img naudojant tavo sukompiliuotus .dtbo failus
           DTBO_SCRIPT=$(find kernel -name "mkdtboimg.py" | head -n 1)
@@ -149,13 +151,13 @@ jobs:
             python3 $DTBO_SCRIPT create HA_dtbo.img $DTBO_FILES
             echo "dtbo.img sėkmingai sukurtas!"
           else
-            echo "ĮSPĖJIMAS: dtbo.img nebuvo sukurtas (nerasti failai)"
+            echo "ĮSPĖJIMAS: dtbo.img nebuvo sukurtas"
           fi
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-A16-Ready
+          name: HA-Server-A16-Images
           path: |
             HA_boot.img
             HA_dtbo.img
