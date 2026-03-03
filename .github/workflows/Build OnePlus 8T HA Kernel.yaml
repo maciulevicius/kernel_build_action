@@ -135,7 +135,7 @@ jobs:
         with:
           name: raw-kernel-build
 
-      - name: Package Images
+      - name: Package Boot and DTBO
         run: |
           # 1. Paruošiame LineageOS įrankius
           git clone --depth 1 https://github.com/LineageOS/android_system_tools_mkbootimg tools
@@ -144,10 +144,11 @@ jobs:
           # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Išpakuojame šabloną
+          # 3. Išpakuojame šabloną, kad gautume originalų ramdiską
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 4. Sukuriame HA_boot.img (Dabar tikrai bus ~60MB)
+          # 4. SUKURIAME NAUJĄ BOOT.IMG (~60MB)
+          # Naudojame Image (uncompressed), gautą iš Job 1
           python3 tools/mkbootimg.py \
             --kernel Image \
             --ramdisk unpacked/ramdisk \
@@ -159,19 +160,22 @@ jobs:
             --os_patch_level 2026-02 \
             -o HA_boot.img
 
-          # 5. Sukuriame HA_dtbo.img (Naudojame iš Job 1 atsineštą įrankį)
+          # 5. Sukuriame DTBO.img (NAUJA VEIKIANTI NUORODA)
+          # Naudojame oficialią AOSP versiją
+          curl -LSs "https://android.googlesource.com/platform/system/libufdt/+/refs/heads/main/utils/src/mkdtboimg.py?format=TEXT" | base64 -d > mkdtboimg_tool.py
+          
           DTBO_FILES=$(ls *.dtbo 2>/dev/null || echo "")
-          if [ -f "mkdtboimg.py" ] && [ -n "$DTBO_FILES" ]; then
-            python3 mkdtboimg.py create HA_dtbo.img $DTBO_FILES
+          if [ -n "$DTBO_FILES" ]; then
+            python3 mkdtboimg_tool.py create HA_dtbo.img $DTBO_FILES
             echo "dtbo.img sėkmingai sukurtas!"
           else
-            echo "ĮSPĖJIMAS: dtbo failai nerasti!"
+            echo "ĮSPĖJIMAS: .dtbo failai nerasti, HA_dtbo.img nebus sukurtas."
           fi
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-Final-Images
+          name: HA-Server-Final-Ready
           path: |
             HA_boot.img
             HA_dtbo.img
