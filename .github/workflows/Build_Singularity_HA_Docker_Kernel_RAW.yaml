@@ -1,5 +1,4 @@
-name: Build Singularity V1.2.5 HA-Docker
-
+name: Build Singularity V1.2.5 HA-Docker-Final
 on:
   workflow_dispatch:
 
@@ -10,90 +9,86 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Dependencies
+      - name: Setup Environment
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip python2-minimal
+          sudo apt-get install -y bc bison build-essential cpio flex git libelf-dev libssl-dev make python3 xz-utils curl zip lz4
 
-      - name: Clone Toolchain
+      - name: Toolchain
         run: |
           git clone --depth 1 https://github.com/kdrag0n/proton-clang clang
-          # Pridedame visą bin aplanką į PATH
           echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
 
-      - name: Clone Singularity V1.2.5 Tag
-        run: |
-          git clone --depth 1 --branch V1.2.5 https://github.com/The-Anomalist/Singularity.git kernel
+      - name: Source
+        run: git clone --depth 1 --branch V1.2.5 https://github.com/The-Anomalist/Singularity.git kernel
 
-      - name: Patch for Compilation
+      - name: "Deep Patch"
         run: |
           cd kernel
-          # 1. Pašaliname KernelSU nuorodas, nes jos trukdo kompiliacijai be šaltinio kodo
-          sed -i '/kernelsu/d' drivers/Kconfig
-          sed -i '/kernelsu/d' drivers/Makefile
+          # Ištaisome include klaidą ne pačioje pradžioje, o po sisteminių bibliotekų
+          sed -i '/#include <linux\/module.h>/a #include "smb5-lib.h"' drivers/power/supply/qcom/schgm-flash.c
           
-          # 2. IŠTAISYTA: Įterpiame bibliotekas teisinga tvarka
-          # Pirmiausia įtraukiame sisteminę power_supply, o tik tada vietinę smb5-lib
-          sed -i '1i#include <linux/power_supply.h>\n#include "smb5-lib.h"' drivers/power/supply/qcom/schgm-flash.c
+          # Išvalome visus galimus senus configus
+          make clean && make mrproper
 
-      - name: Build Kernel
+      - name: Build
         run: |
           cd kernel
           export PATH=$GITHUB_WORKSPACE/clang/bin:$PATH
           
-          # Nustatome bazinį defconfig
+          # Bazinė konfigūracija
           make O=out ARCH=arm64 vendor/kona-perf_defconfig
           
-          # ĮJUNGIAME PILNĄ DOCKER PALAIKYMĄ
-          {
-            echo "CONFIG_NAMESPACES=y"
-            echo "CONFIG_NET_NS=y"
-            echo "CONFIG_PID_NS=y"
-            echo "CONFIG_IPC_NS=y"
-            echo "CONFIG_UTS_NS=y"
-            echo "CONFIG_USER_NS=y" # Labai svarbu Docker saugumui
-            echo "CONFIG_CGROUPS=y"
-            echo "CONFIG_CGROUP_PIDS=y"
-            echo "CONFIG_MEMCG=y"
-            echo "CONFIG_CPUSETS=y"
-            echo "CONFIG_CGROUP_DEVICE=y"
-            echo "CONFIG_CGROUP_CPUACCT=y"
-            echo "CONFIG_OVERLAY_FS=y"
-            echo "CONFIG_VETH=y"
-            echo "CONFIG_BRIDGE=y"
-            echo "CONFIG_NETFILTER_XT_MATCH_ADDRTYPE=y"
-            echo "CONFIG_IP_NF_NAT=y"
-            echo "CONFIG_IP_NF_TARGET_MASQUERADE=y"
-            echo "CONFIG_IKCONFIG=y" # Leis Docker patikrinti branduolio konfigūraciją
-            echo "CONFIG_IKCONFIG_PROC=y"
-            echo "CONFIG_USB_SERIAL=y"
-            echo "CONFIG_USB_SERIAL_CP210X=y"
-            echo "CONFIG_USB_SERIAL_CH341=y"
-            echo "CONFIG_USB_SERIAL_FTDI_SIO=y"
-          } >> out/.config
+          # DOCKER REIKALAVIMAI (Naudojame skriptą, kad užtikrintume priklausomybes)
+          scripts/config --file out/.config -e NAMESPACES
+          scripts/config --file out/.config -e NET_NS
+          scripts/config --file out/.config -e PID_NS
+          scripts/config --file out/.config -e IPC_NS
+          scripts/config --file out/.config -e UTS_NS
+          scripts/config --file out/.config -e CGROUPS
+          scripts/config --file out/.config -e MEMCG
+          scripts/config --file out/.config -e USER_NS
+          scripts/config --file out/.config -e OVERLAY_FS
+          scripts/config --file out/.config -e VETH
+          scripts/config --file out/.config -e BRIDGE
+          scripts/config --file out/.config -e IKCONFIG
+          scripts/config --file out/.config -e IKCONFIG_PROC
           
-          # Priverčiame priimti visus pakeitimus
+          # OPLUS FIX (Priverstinai įjungia tai, kas dingsta)
+          scripts/config --file out/.config -e OPLUS_FEATURE_SOC_INFO
+          scripts/config --file out/.config -e OPLUS_PROJECT_INFO
+          
+          # SVARBU: Išjungiam LTO, jei metamos linker klaidos (tai padės telefonui pasileisti!)
+          scripts/config --file out/.config -d LTO_CLANG
+          scripts/config --file out/.config -e LTO_NONE
+
           make O=out ARCH=arm64 olddefconfig
-          
-          # KOMPILIUOJAME
-          # Naudojame visus LLVM įrankius (clang, ld.lld, llvm-ar), kad išvengtume LSE atomics klaidų
+
+          # KOMPILIUOJAME Image.lz4 (tai išspręs dydžio problemą)
           make -j$(nproc --all) O=out ARCH=arm64 \
             CC=clang \
+            NM=llvm-nm \
+            OBJCOPY=llvm-objcopy \
+            OBJDUMP=llvm-objdump \
+            STRIP=llvm-strip \
             LLVM=1 \
             LLVM_IAS=1 \
             CROSS_COMPILE=aarch64-linux-gnu- \
             CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-            KCFLAGS="-w" Image dtbs
+            Image.lz4 dtbs
 
-      - name: Prepare Files
+      - name: AnyKernel3 (Teisingas pakavimas)
         run: |
-          mkdir -p raw_artifacts
-          [ -f kernel/out/arch/arm64/boot/Image ] && cp kernel/out/arch/arm64/boot/Image raw_artifacts/
-          find kernel/out -name "*.dtb" -exec cat {} + > raw_artifacts/dtb_merged
-          find kernel/out -name "*.dtbo" -exec cp {} raw_artifacts/ \;
+          git clone https://github.com/osm0sis/AnyKernel3.git
+          cd AnyKernel3
+          cp ../kernel/out/arch/arm64/boot/Image.lz4 .
+          find ../kernel/out/arch/arm64/boot/dts/ -name "*.dtb" -exec cat {} + > dtb
+          # Nustatymai kebabui
+          sed -i 's/device.name1=maguro/device.name1=kebab/g' anykernel.sh
+          zip -r ../Singularity-Docker.zip *
 
-      - name: Upload Artifacts
+      - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: Singularity-Kona-Docker-V125
-          path: raw_artifacts/
+          name: Singularity-Kebab-Docker
+          path: Singularity-Docker.zip
