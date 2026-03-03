@@ -121,24 +121,23 @@ jobs:
 
       - name: Package Boot and DTBO Images
         run: |
-          # 1. Atsisiunčiame oficialius AOSP paketavimo įrankius (Python skriptus)
-          curl -LSs "https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/unpack_bootimg.py?format=TEXT" | base64 -d > unpack_bootimg.py
-          curl -LSs "https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/main/mkbootimg.py?format=TEXT" | base64 -d > mkbootimg.py
-          chmod +x unpack_bootimg.py mkbootimg.py
+          # 1. Parsisiunčiame oficialius LineageOS paketavimo įrankius
+          git clone https://github.com/LineageOS/android_system_tools_mkbootimg tools
+          export PYTHONPATH=$PYTHONPATH:$(pwd)/tools
 
           # 2. Atsisiunčiame Singularity V1.2.5 šabloną
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Išpakuojame šabloną, kad gautume originalų ramdiską
-          python3 unpack_bootimg.py --boot_img template_boot.img --out unpacked
+          # 3. Išpakuojame šabloną naudojant naujai parsiųstą skriptą
+          python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
           # 4. Paruošiame tavo naują DTB (Sujungiame visus tavo sukompiliuotus failus)
           find kernel/out -name "*.dtb" -exec cat {} + > dtb_merged
           
-          # 5. SUKURIAME NAUJĄ BOOT.IMG (Naudojame tavo nustatytus parametrus iš logų)
-          # Parametrai paimti tiesiai iš tavo atsiųsto Singularity logo:
-          # Header v2, Pagesize 4096, OS v16.0.0
-          python3 mkbootimg.py \
+          # 5. SUKURIAME NAUJĄ BOOT.IMG
+          # Naudojame tavo OnePlus 8T parametrus (ištrauktus iš tavo logų):
+          # Header v2, Pagesize 4096, CMDLINE, OS v16.0.0
+          python3 tools/mkbootimg.py \
             --kernel kernel/out/arch/arm64/boot/Image.gz \
             --ramdisk unpacked/ramdisk \
             --dtb dtb_merged \
@@ -148,6 +147,12 @@ jobs:
             --os_version 16.0.0 \
             --os_patch_level 2026-02 \
             -o HA_boot.img
+
+          # Patikriname ar failas sukurtas ir jo dydis tinkamas
+          if [ ! -f "HA_boot.img" ] || [ $(stat -c%s "HA_boot.img") -lt 10000000 ]; then
+            echo "KLAIDA: HA_boot.img paketavimas nepavyko!"
+            exit 1
+          fi
 
           # 6. Sukuriame DTBO.img naudojant tavo sukompiliuotus .dtbo failus
           DTBO_SCRIPT=$(find kernel -name "mkdtboimg.py" | head -n 1)
