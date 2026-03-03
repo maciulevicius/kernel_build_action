@@ -119,18 +119,22 @@ jobs:
 
       - name: Package Boot and DTBO Images
         run: |
-          # 1. Atsisiunčiame magiskboot, kuris veikia LINUX aplinkoje
-          curl -LSsL "https://github.com/osm0sis/AnyKernel3/raw/master/tools/magiskboot" -o magiskboot
+          # 1. Atsisiunčiame magiskboot, skirtą Linux x86_64 naudojant tavo linką
+          curl -LSsL "https://github.com/magojohnji/magiskboot-linux/raw/refs/heads/main/x86_64/magiskboot" -o magiskboot
           chmod +x magiskboot
           
-          # 2. Atsisiunčiame Singularity V1.2.5 šabloną
+          # 2. Atsisiunčiame Singularity V1.2.5 šabloną (boot.img)
           curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/V1.2.5/boot.img" -o template_boot.img
 
-          # 3. Paruošiame DTB (Sujungiame visus tavo sukompiliuotus DTB failus)
+          # 3. Paruošiame tavo naują DTB (Sujungiame visus sukompiliuotus failus)
+          # Tai užtikrins, kad Docker ir USB resursai būtų teisingai aprašyti
           find kernel/out -name "*.dtb" -exec cat {} + > dtb_merged
           
-          # 4. Sukeičiame branduolį ir DTB šablone
+          # 4. Sukeičiame komponentus šablone
           ./magiskboot unpack template_boot.img
+          
+          # magiskboot unpack ištraukia failus pavadinimais 'kernel' ir 'dtb'
+          # Mes juos pakeičiame tavo naujai sukompiliuotais
           cp kernel/out/arch/arm64/boot/Image.gz kernel
           cp dtb_merged dtb
           
@@ -138,13 +142,21 @@ jobs:
           ./magiskboot repack template_boot.img HA_boot.img
 
           # 6. Sukuriame DTBO.img naudojant tavo sukompiliuotus .dtbo failus
+          # mkdtboimg.py skriptas surandamas automatiškai
           DTBO_SCRIPT=$(find kernel -name "mkdtboimg.py" | head -n 1)
-          python3 $DTBO_SCRIPT create HA_dtbo.img $(find kernel/out -name "*.dtbo")
+          DTBO_FILES=$(find kernel/out -name "*.dtbo")
+          
+          if [ -n "$DTBO_SCRIPT" ] && [ -n "$DTBO_FILES" ]; then
+            python3 $DTBO_SCRIPT create HA_dtbo.img $DTBO_FILES
+            echo "dtbo.img sėkmingai sukurtas!"
+          else
+            echo "ĮSPĖJIMAS: dtbo.img nebuvo sukurtas (nerasti failai)"
+          fi
 
       - name: Upload Final Images
         uses: actions/upload-artifact@v4
         with:
-          name: HA-Server-Final-A16
+          name: HA-Server-A16-Ready
           path: |
             HA_boot.img
             HA_dtbo.img
