@@ -148,8 +148,8 @@ jobs:
           # 3. Išpakuojame šabloną
           python3 tools/unpack_bootimg.py --boot_img template_boot.img --out unpacked
 
-          # 4. SUKURIAME NAUJĄ BOOT.IMG (22MB -> ~60MB fix)
-          # Pridėjau --ramdisk unpacked/ramdisk, kad neprarastume failų sistemos
+          # 4. SUKURIAME NAUJĄ BOOT.IMG
+          # Naudojame Image.gz, unpacked/ramdisk ir dtb_merged
           python3 tools/mkbootimg.py \
             --kernel Image.gz \
             --ramdisk unpacked/ramdisk \
@@ -161,9 +161,8 @@ jobs:
             --os_patch_level 2026-02 \
             -o HA_boot.img
 
-          # 5. Sukuriame DTBO.img
-          # Atsisiunčiame mkdtboimg skriptą, jei jo nėra
-          curl -LSs "https://raw.githubusercontent.com/osm0sis/mkdtboimg/master/mkdtboimg.py" -o mkdtboimg.py
+          # 5. Sukuriame DTBO.img (PATAISYTA NUORODA)
+          curl -LSsL "https://raw.githubusercontent.com/osm0sis/AnyKernel3/master/tools/mkdtboimg.py" -o mkdtboimg.py
           python3 mkdtboimg.py create HA_dtbo.img $(ls *.dtbo)
 
       - name: Upload Final Images
