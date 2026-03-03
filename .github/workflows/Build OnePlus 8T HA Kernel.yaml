@@ -112,31 +112,31 @@ jobs:
 
       - name: Package Boot and DTBO Images
         run: |
-          # Atsisiunčiame magiskboot įrankį (x86_64 versija Linux)
-          curl -Lo magiskboot https://github.com/maciulevicius/kernel_build_action/raw/main/tools/magiskboot
+          # 1. Atsisiunčiame magiskboot naudojant TIESIOGINĮ RAW linką
+          curl -LSs "https://raw.githubusercontent.com/maciulevicius/kernel_build_action/main/tools/magiskboot" -o magiskboot
           chmod +x magiskboot
           
-          # Atsisiunčiame tavo naudojamą SINGULARITY RELEASINĮ BOOT.IMG (Template)
-          # Jei turi tikslų linką, pakeisk čia. Naudoju pavyzdį:
-          curl -Lo template_boot.img https://github.com/The-Anomalist/Singularity/releases/download/v4.19.325/magisk_patched.img
+          # 2. Atsisiunčiame tavo naudojamą SINGULARITY BOOT.IMG kaip šabloną
+          # SVARBU: Naudojame -L, kad sektų redirectus (iš GitHub į AWS)
+          # Įsitikink, kad ši versija (v4.19.325) yra būtent ta, kurią naudoji telefone
+          curl -LSsL "https://github.com/The-Anomalist/Singularity/releases/download/v4.19.325/magisk_patched.img" -o template_boot.img
 
-          # 1. Paruošiame DTB
+          # Patikriname, ar failas atsisiuntė (jei tik keli baitai - vadinasi klaida)
+          if [ $(stat -c%s "template_boot.img") -lt 1000 ]; then
+            echo "KLAIDA: Nepavyko atsisiųsti template_boot.img. Patikrink URL!"
+            cat template_boot.img # Parodys klaidą
+            exit 1
+          fi
+
+          # 3. Paruošiame DTB (Sujungiame visus tavo sukompiliuotus DTB)
           find kernel/out -name "*.dtb" -exec cat {} + > dtb_merged
           
-          # 2. Sukeičiame branduolį ir DTB šablone
+          # 4. Sukeičiame branduolį ir DTB šablone
           ./magiskboot unpack template_boot.img
           cp kernel/out/arch/arm64/boot/Image.gz kernel
           cp dtb_merged dtb
           ./magiskboot repack template_boot.img HA_boot.img
 
-          # 3. Sukuriame DTBO.img
+          # 5. Sukuriame DTBO.img naudojant tavo sukompiliuotus .dtbo failus
           DTBO_SCRIPT=$(find kernel -name "mkdtboimg.py" | head -n 1)
           python3 $DTBO_SCRIPT create HA_dtbo.img $(find kernel/out -name "*.dtbo")
-
-      - name: Upload Final Images
-        uses: actions/upload-artifact@v4
-        with:
-          name: HA-Server-Final-Images
-          path: |
-            HA_boot.img
-            HA_dtbo.img
